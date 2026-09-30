@@ -351,7 +351,7 @@
                               "progressValue": "${videoProgressValue - trackOffset}",
                               "totalValue": "${trackDuration}",
                               "positionPropertyName": "sliderThumbPosition",
-                              "metadataDisplayed": "${trackDuration > 0}",
+                              "metadataDisplayed": true,
                               "metadataPosition": "above_right",
                               "width": "100%",
                               "theme": "${viewport.theme}"
