@@ -389,6 +389,18 @@ def update_apl_metadata(response_builder):
         logging.exception('Error while updating APL metadata')
 
 
+def execute_apl_commands(response_builder, commands):
+    """Send APL commands to the player page, if there are any."""
+    if not commands or not apl_enabled():
+        return
+    response_builder.add_directive(
+        ExecuteCommandsDirective(
+            commands=commands,
+            token="playbackToken"
+        )
+    )
+
+
 def schedule_apl_refresh(response_builder, delay_ms=1000):
     """Schedule the next APL metadata refresh via a UserEvent.
 
@@ -406,7 +418,8 @@ def schedule_apl_refresh(response_builder, delay_ms=1000):
                 "type": "SendEvent",
                 "arguments": [
                     "MetadataRefresh",
-                    "${refreshTick}"
+                    "${refreshTick}",
+                    "${videoProgressValue}"
                 ]
             }
         ]

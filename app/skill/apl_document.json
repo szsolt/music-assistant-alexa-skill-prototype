@@ -107,12 +107,6 @@
     "AudioPlayer": {
       "parameters": [
         {
-          "name": "audioControlType",
-          "description": "The type of audio control to use. Default is skip (foward and backwards). Other options are skip | jump10 | jump30 | none.",
-          "type": "string",
-          "default": "skip"
-        },
-        {
           "name": "audioSources",
           "description": "Audio single source or an array of sources. Audios will be in a playlist if multiple sources are provided.",
           "type": "any"
@@ -171,17 +165,17 @@
               "value": 0
             },
             {
-              "name": "sliderActive",
-              "type": "boolean",
-              "value": false
-            },
-            {
               "name": "videoProgressValue",
               "type": "number",
               "value": 0
             },
             {
-              "name": "videoTotalValue",
+              "name": "trackOffset",
+              "type": "number",
+              "value": 0
+            },
+            {
+              "name": "trackDuration",
               "type": "number",
               "value": 0
             },
@@ -209,7 +203,8 @@
                   "type": "SendEvent",
                   "arguments": [
                     "MetadataRefresh",
-                    "${refreshTick}"
+                    "${refreshTick}",
+                    "${videoProgressValue}"
                   ]
                 }
               ]
@@ -323,20 +318,6 @@
                       "audioTrack": "background",
                       "source": "${audioSources}",
                       "position": "absolute",
-                      "onPlay": [
-                        {
-                          "type": "SetValue",
-                          "property": "videoTotalValue",
-                          "value": "${event.duration}"
-                        }
-                      ],
-                      "onTrackUpdate": [
-                        {
-                          "type": "SetValue",
-                          "property": "videoTotalValue",
-                          "value": "${event.duration}"
-                        }
-                      ],
                       "onTimeUpdate": [
                         {
                           "type": "SetValue",
@@ -347,26 +328,7 @@
                           "type": "SetValue",
                           "componentId": "slider",
                           "property": "progressValue",
-                          "value": "${videoProgressValue}"
-                        },
-                        {
-                          "type": "SetValue",
-                          "property": "videoTotalValue",
-                          "value": "${event.duration}"
-                        }
-                      ],
-                      "onTrackReady": [
-                        {
-                          "type": "SetValue",
-                          "property": "videoTotalValue",
-                          "value": "${event.duration}"
-                        }
-                      ],
-                      "onTrackFail": [
-                        {
-                          "type": "SetValue",
-                          "property": "videoTotalValue",
-                          "value": "0"
+                          "value": "${videoProgressValue - trackOffset}"
                         }
                       ]
                     },
@@ -385,45 +347,77 @@
                             {
                               "type": "AlexaSlider",
                               "id": "slider",
-                              "progressValue": "${videoProgressValue}",
-                              "totalValue": "${videoTotalValue}",
+                              "progressValue": "${videoProgressValue - trackOffset}",
+                              "totalValue": "${trackDuration}",
                               "positionPropertyName": "sliderThumbPosition",
-                              "metadataDisplayed": true,
+                              "metadataDisplayed": "${trackDuration > 0}",
                               "metadataPosition": "above_right",
                               "width": "100%",
-                              "theme": "${viewport.theme}",
-                              "onUpCommand": [
-                                {
-                                  "type": "ControlMedia",
-                                  "componentId": "videoPlayer",
-                                  "command": "seek",
-                                  "value": "${sliderThumbPosition - videoProgressValue}"
-                                }
-                              ],
-                              "onMoveCommand": [
-                                {
-                                  "type": "SetValue",
-                                  "property": "sliderActive",
-                                  "value": true
-                                }
-                              ],
-                              "onDownCommand": [
-                                {
-                                  "type": "SetValue",
-                                  "property": "sliderActive",
-                                  "value": true
-                                }
-                              ]
+                              "theme": "${viewport.theme}"
                             },
                             {
-                              "type": "AlexaTransportControls",
-                              "mediaComponentId": "videoPlayer",
-                              "playPauseToggleButtonId": "playPauseToggleButtonId",
-                              "primaryControlSize": "@primaryControlSize",
-                              "secondaryControls": "${audioControlType}",
-                              "secondaryControlSize": "@secondaryControlSize",
-                              "autoplay": true,
-                              "theme": "${viewport.theme}"
+                              "type": "Container",
+                              "direction": "row",
+                              "alignItems": "center",
+                              "justifyContent": "center",
+                              "items": [
+                                {
+                                  "type": "TouchWrapper",
+                                  "id": "previousButton",
+                                  "accessibilityLabel": "Previous",
+                                  "width": "@secondaryControlSize",
+                                  "height": "@secondaryControlSize",
+                                  "onPress": [
+                                    {
+                                      "type": "SendEvent",
+                                      "arguments": [
+                                        "Previous"
+                                      ]
+                                    }
+                                  ],
+                                  "item": {
+                                    "type": "VectorGraphic",
+                                    "source": "skipPreviousIcon",
+                                    "color": "@colorText",
+                                    "width": "100%",
+                                    "height": "100%",
+                                    "scale": "best-fit"
+                                  }
+                                },
+                                {
+                                  "type": "AlexaTransportControls",
+                                  "mediaComponentId": "videoPlayer",
+                                  "playPauseToggleButtonId": "playPauseToggleButtonId",
+                                  "primaryControlSize": "@primaryControlSize",
+                                  "secondaryControls": "none",
+                                  "secondaryControlSize": "@secondaryControlSize",
+                                  "autoplay": true,
+                                  "theme": "${viewport.theme}"
+                                },
+                                {
+                                  "type": "TouchWrapper",
+                                  "id": "nextButton",
+                                  "accessibilityLabel": "Next",
+                                  "width": "@secondaryControlSize",
+                                  "height": "@secondaryControlSize",
+                                  "onPress": [
+                                    {
+                                      "type": "SendEvent",
+                                      "arguments": [
+                                        "Next"
+                                      ]
+                                    }
+                                  ],
+                                  "item": {
+                                    "type": "VectorGraphic",
+                                    "source": "skipNextIcon",
+                                    "color": "@colorText",
+                                    "width": "100%",
+                                    "height": "100%",
+                                    "scale": "best-fit"
+                                  }
+                                }
+                              ]
                             }
                           ]
                         }
@@ -473,5 +467,47 @@
         "sliderType": "determinate"
       }
     ]
+  },
+  "graphics": {
+    "skipPreviousIcon": {
+      "type": "AVG",
+      "version": "1.2",
+      "width": 24,
+      "height": 24,
+      "parameters": [
+        {
+          "name": "color",
+          "type": "color",
+          "default": "white"
+        }
+      ],
+      "items": [
+        {
+          "type": "path",
+          "fill": "${color}",
+          "pathData": "M6 6h2v12H6zm3.5 6l8.5 6V6z"
+        }
+      ]
+    },
+    "skipNextIcon": {
+      "type": "AVG",
+      "version": "1.2",
+      "width": 24,
+      "height": 24,
+      "parameters": [
+        {
+          "name": "color",
+          "type": "color",
+          "default": "white"
+        }
+      ],
+      "items": [
+        {
+          "type": "path",
+          "fill": "${color}",
+          "pathData": "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"
+        }
+      ]
+    }
   }
 }

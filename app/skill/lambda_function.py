@@ -11,7 +11,7 @@ from ask_sdk_core.utils import is_request_type, is_intent_name
 from ask_sdk_core.handler_input import HandlerInput
 from ask_sdk_model import Response
 
-from . import data, util, device_mapping, ma_control
+from . import data, util, device_mapping, ma_control, track_time
 
 sb = StandardSkillBuilder()
 # sb = StandardSkillBuilder(
@@ -278,6 +278,23 @@ def _sync_to_ma_unless_echo(handler_input, command):
         logger.warning("Failed to sync %s to MA player %s", command, player_id)
 
 
+def _next_or_previous_to_ma(handler_input, command):
+    """Send next/previous to the MA player paired with the requesting Echo.
+
+    Returns "ok", "unmapped" (Echo not paired in /devices) or "failed".
+    MA then pushes the new stream and relaunches the skill, as for any
+    track change.
+    """
+    device_id = _device_id_from(handler_input)
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        logger.warning("No MA player mapped for device_id=%s", device_id)
+        return "unmapped"
+    if not ma_control.send_player_command(player_id, command):
+        return "failed"
+    return "ok"
+
+
 class NextOrPreviousIntentHandler(AbstractRequestHandler):
     """Handler for next or previous intents.
 
@@ -298,15 +315,13 @@ class NextOrPreviousIntentHandler(AbstractRequestHandler):
         intent_name = handler_input.request_envelope.request.intent.name
         command = "next" if intent_name == "AMAZON.NextIntent" else "previous"
 
-        device_id = _device_id_from(handler_input)
-        player_id = device_mapping.get_player_for_device(device_id)
-        if not player_id:
-            logger.warning("No MA player mapped for device_id=%s", device_id)
+        result = _next_or_previous_to_ma(handler_input, command)
+        if result == "unmapped":
             handler_input.response_builder.speak(
                 _(data.DEVICE_NOT_MAPPED_MSG)).set_should_end_session(True)
             return handler_input.response_builder.response
 
-        if not ma_control.send_player_command(player_id, command):
+        if result == "failed":
             handler_input.response_builder.speak(
                 _(data.MA_COMMAND_FAILED_MSG)).set_should_end_session(True)
             return handler_input.response_builder.response
@@ -578,32 +593,72 @@ class ExceptionEncounteredHandler(AbstractRequestHandler):
 # ########## APL INTERFACE HANDLERS #################################
 # This section contains handlers related to APL interface
 
-class APLUserEventHandler(AbstractRequestHandler):
-    """Handler for APL UserEvent requests.
+_APL_EVENTS = ("MetadataRefresh", "Next", "Previous")
+_track_changes = track_time.TrackChangeTracker()
 
-    This handles periodic metadata refresh events sent from the APL document.
-    When the APL display sends a UserEvent with eventType='MetadataRefresh',
-    this handler fetches the latest metadata from Music Assistant and sends
-    an updated APL document to refresh the display.
+
+def _apl_event_arguments(handler_input):
+    try:
+        return list(getattr(handler_input.request_envelope.request, 'arguments', None) or [])
+    except Exception:
+        return []
+
+
+def _session_id_from(handler_input):
+    session = getattr(handler_input.request_envelope, 'session', None)
+    return getattr(session, 'session_id', None) or _device_id_from(handler_input)
+
+
+def _track_time_commands(handler_input, arguments):
+    """SetValue commands for trackOffset/trackDuration, or [] if unneeded.
+
+    Only on a track change (or the first refresh of a new page): MA is
+    asked once, and the page counts from its own video position after that.
+    """
+    key = track_time.track_key(data.info)
+    if not _track_changes.changed(_session_id_from(handler_input), key):
+        return []
+    player_id = device_mapping.get_player_for_device(_device_id_from(handler_input))
+    if not player_id:
+        return []
+    position = track_time.video_position_ms(arguments)
+    result = ma_control.get_current_track_time(player_id)
+    if result is None:
+        return track_time.set_track_time_commands(None, None)
+    duration_ms, elapsed_ms = result
+    offset = None if position is None else track_time.track_offset_ms(position, elapsed_ms)
+    logger.info("Track time for %s: duration=%s ms elapsed=%s ms offset=%s ms",
+                player_id, duration_ms, elapsed_ms, offset)
+    return track_time.set_track_time_commands(offset, duration_ms)
+
+
+class APLUserEventHandler(AbstractRequestHandler):
+    """Handler for APL UserEvent requests from the player page.
+
+    - MetadataRefresh: sent every couple of seconds; updates title, artist
+      and images, and on a track change the track time (see track_time).
+    - Next / Previous: the page's own buttons. They go to MA like "Alexa,
+      next" does; the page's video must not skip by itself, since it only
+      has the one flow stream the page was opened with.
     """
     def can_handle(self, handler_input):
         # type: (HandlerInput) -> bool
         if not is_request_type("Alexa.Presentation.APL.UserEvent")(handler_input):
             return False
-
-        # Check if this is a metadata refresh event
-        request = handler_input.request_envelope.request
-        try:
-            arguments = getattr(request, 'arguments', [])
-            if arguments and len(arguments) > 0:
-                event_type = arguments[0]
-                return event_type == 'MetadataRefresh'
-        except Exception:
-            pass
-        return False
+        arguments = _apl_event_arguments(handler_input)
+        return bool(arguments) and arguments[0] in _APL_EVENTS
 
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
+        arguments = _apl_event_arguments(handler_input)
+        if arguments[0] in ("Next", "Previous"):
+            command = arguments[0].lower()
+            logger.info("APL %s button", command)
+            _next_or_previous_to_ma(handler_input, command)
+            # A button press stops the page's running command sequence, and with
+            # it the refresh chain; restart it in case MA doesn't relaunch us.
+            self._schedule_refresh(handler_input)
+            return handler_input.response_builder.set_should_end_session(None).response
 
         # Fetch latest metadata from Music Assistant
         changed = False
@@ -628,17 +683,25 @@ class APLUserEventHandler(AbstractRequestHandler):
                     logger.info("APL metadata update directive added to response")
                 except Exception:
                     logger.exception("Failed to update APL metadata")
+            try:
+                util.execute_apl_commands(handler_input.response_builder,
+                                          _track_time_commands(handler_input, arguments))
+            except Exception:
+                logger.exception("Failed to update APL track time")
 
+        self._schedule_refresh(handler_input)
+
+        # Unset, not False: False opens the mic on every refresh and ducks the music;
+        # the APL page keeps the session alive by itself.
+        return handler_input.response_builder.set_should_end_session(None).response
+
+    @staticmethod
+    def _schedule_refresh(handler_input):
         # Always schedule the next refresh so polling continues.
         try:
             util.schedule_apl_refresh(handler_input.response_builder)
         except Exception:
             logger.exception("Failed to schedule APL refresh")
-
-        # Explicitly keep session open to allow continued UserEvents
-        # Unset, not False: False opens the mic on every refresh and ducks the music;
-        # the APL page keeps the session alive by itself.
-        return handler_input.response_builder.set_should_end_session(None).response
 
 # ###################################################################
 
@@ -699,13 +762,7 @@ class NextOrPreviousCommandHandler(AbstractRequestHandler):
         req_type = handler_input.request_envelope.request.object_type
         command = "next" if "Next" in req_type else "previous"
 
-        device_id = _device_id_from(handler_input)
-        player_id = device_mapping.get_player_for_device(device_id)
-        if player_id:
-            ma_control.send_player_command(player_id, command)
-        else:
-            logger.warning("No MA player mapped for device_id=%s (hardware command)", device_id)
-
+        _next_or_previous_to_ma(handler_input, command)
         return handler_input.response_builder.response
 
 
