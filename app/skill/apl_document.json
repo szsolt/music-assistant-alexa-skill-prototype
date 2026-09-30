@@ -376,9 +376,21 @@
                                     },
                                     {
                                       "type": "SetValue",
-                                      "componentId": "Audio_TrackRow",
-                                      "property": "opacity",
-                                      "value": 0.4
+                                      "componentId": "Busy_Overlay",
+                                      "property": "display",
+                                      "value": "normal"
+                                    },
+                                    {
+                                      "type": "AnimateItem",
+                                      "componentId": "Busy_Overlay",
+                                      "duration": 200,
+                                      "value": [
+                                        {
+                                          "property": "opacity",
+                                          "from": 0,
+                                          "to": 1
+                                        }
+                                      ]
                                     },
                                     {
                                       "type": "SendEvent",
@@ -420,9 +432,21 @@
                                     },
                                     {
                                       "type": "SetValue",
-                                      "componentId": "Audio_TrackRow",
-                                      "property": "opacity",
-                                      "value": 0.4
+                                      "componentId": "Busy_Overlay",
+                                      "property": "display",
+                                      "value": "normal"
+                                    },
+                                    {
+                                      "type": "AnimateItem",
+                                      "componentId": "Busy_Overlay",
+                                      "duration": 200,
+                                      "value": [
+                                        {
+                                          "property": "opacity",
+                                          "from": 0,
+                                          "to": 1
+                                        }
+                                      ]
                                     },
                                     {
                                       "type": "SendEvent",
@@ -465,6 +489,39 @@
                   ]
                 }
               ]
+            },
+            {
+              "type": "TouchWrapper",
+              "id": "Busy_Overlay",
+              "description": "Covers the page after next/previous until MA opens the new track; swallows taps.",
+              "position": "absolute",
+              "top": 0,
+              "left": 0,
+              "width": "100vw",
+              "height": "100vh",
+              "display": "none",
+              "opacity": 0,
+              "onPress": [],
+              "item": {
+                "type": "Frame",
+                "width": "100%",
+                "height": "100%",
+                "backgroundColor": "rgba(0,0,0,0.65)",
+                "item": {
+                  "type": "Container",
+                  "width": "100%",
+                  "height": "100%",
+                  "alignItems": "center",
+                  "justifyContent": "center",
+                  "item": [
+                    {
+                      "type": "AlexaProgressDots",
+                      "dotSize": "24dp",
+                      "theme": "${viewport.theme}"
+                    }
+                  ]
+                }
+              }
             }
           ]
         }

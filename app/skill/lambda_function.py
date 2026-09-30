@@ -596,7 +596,8 @@ class ExceptionEncounteredHandler(AbstractRequestHandler):
 _APL_EVENTS = ("MetadataRefresh", "Next", "Previous")
 _UNDO_BUTTON_PRESS = [
     {"type": "ControlMedia", "componentId": "videoPlayer", "command": "play"},
-    {"type": "SetValue", "componentId": "Audio_TrackRow", "property": "opacity", "value": 1},
+    {"type": "SetValue", "componentId": "Busy_Overlay", "property": "opacity", "value": 0},
+    {"type": "SetValue", "componentId": "Busy_Overlay", "property": "display", "value": "none"},
 ]
 _track_changes = track_time.TrackChangeTracker()
 
@@ -659,7 +660,7 @@ class APLUserEventHandler(AbstractRequestHandler):
             command = arguments[0].lower()
             logger.info("APL %s button", command)
             if _next_or_previous_to_ma(handler_input, command) != "ok":
-                # MA won't send a new stream: undo the page's pause and fade.
+                # MA won't send a new stream: undo the page's pause and overlay.
                 util.execute_apl_commands(handler_input.response_builder, _UNDO_BUTTON_PRESS)
             # A button press stops the page's running command sequence, and with
             # it the refresh chain; restart it in case MA doesn't relaunch us.
