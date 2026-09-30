@@ -57,3 +57,35 @@ def test_set_track_time_commands():
 def test_set_track_time_commands_unknown():
     cmds = tt.set_track_time_commands(None, None)
     assert [(c["property"], c["value"]) for c in cmds] == [("trackDuration", 0)]
+
+
+def test_offset_prefers_previous_track_end():
+    assert tt.choose_offset_ms(215_000, None, 3_000) == 215_000
+    assert tt.choose_offset_ms(215_000, 400_000, 3_000) == 215_000
+
+
+def test_offset_falls_back_to_position_then_none():
+    assert tt.choose_offset_ms(None, 400_000, 12_000) == 388_000
+    assert tt.choose_offset_ms(None, None, 12_000) is None
+    assert tt.choose_offset_ms(None, 400_000, None) is None
+
+
+def test_tracker_chains_track_ends_within_a_page():
+    t = tt.TrackChangeTracker()
+    t.changed("s1", ("u", "Rain", ""))
+    assert t.previous_end("s1") == 0          # first track of a page
+    t.record("s1", 0, 10_000)
+    t.changed("s1", ("u", "Mercy Street", ""))
+    assert t.previous_end("s1") == 10_000
+    t.record("s1", 10_000, 376_000)
+    t.changed("s1", ("u", "Next one", ""))
+    assert t.previous_end("s1") == 386_000
+
+
+def test_tracker_unknown_duration_breaks_the_chain():
+    t = tt.TrackChangeTracker()
+    t.changed("s1", ("u", "Radio", ""))
+    t.record("s1", 0, None)
+    t.changed("s1", ("u", "Song", ""))
+    assert t.previous_end("s1") is None
+    assert t.previous_end("nope") is None

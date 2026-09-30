@@ -594,6 +594,10 @@ class ExceptionEncounteredHandler(AbstractRequestHandler):
 # This section contains handlers related to APL interface
 
 _APL_EVENTS = ("MetadataRefresh", "Next", "Previous")
+_UNDO_BUTTON_PRESS = [
+    {"type": "ControlMedia", "componentId": "videoPlayer", "command": "play"},
+    {"type": "SetValue", "componentId": "Audio_TrackRow", "property": "opacity", "value": 1},
+]
 _track_changes = track_time.TrackChangeTracker()
 
 
@@ -618,15 +622,15 @@ def _track_time_commands(handler_input, arguments):
     key = track_time.track_key(data.info)
     if not _track_changes.changed(_session_id_from(handler_input), key):
         return []
+    session_id = _session_id_from(handler_input)
     player_id = device_mapping.get_player_for_device(_device_id_from(handler_input))
     if not player_id:
         return []
-    position = track_time.video_position_ms(arguments)
     result = ma_control.get_current_track_time(player_id)
-    if result is None:
-        return track_time.set_track_time_commands(None, None)
-    duration_ms, elapsed_ms = result
-    offset = None if position is None else track_time.track_offset_ms(position, elapsed_ms)
+    duration_ms, elapsed_ms = result if result else (None, None)
+    offset = track_time.choose_offset_ms(_track_changes.previous_end(session_id),
+                                         track_time.video_position_ms(arguments), elapsed_ms)
+    _track_changes.record(session_id, offset, duration_ms)
     logger.info("Track time for %s: duration=%s ms elapsed=%s ms offset=%s ms",
                 player_id, duration_ms, elapsed_ms, offset)
     return track_time.set_track_time_commands(offset, duration_ms)
@@ -654,7 +658,9 @@ class APLUserEventHandler(AbstractRequestHandler):
         if arguments[0] in ("Next", "Previous"):
             command = arguments[0].lower()
             logger.info("APL %s button", command)
-            _next_or_previous_to_ma(handler_input, command)
+            if _next_or_previous_to_ma(handler_input, command) != "ok":
+                # MA won't send a new stream: undo the page's pause and fade.
+                util.execute_apl_commands(handler_input.response_builder, _UNDO_BUTTON_PRESS)
             # A button press stops the page's running command sequence, and with
             # it the refresh chain; restart it in case MA doesn't relaunch us.
             self._schedule_refresh(handler_input)

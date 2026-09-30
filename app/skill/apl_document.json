@@ -297,7 +297,8 @@
                         }
                       ]
                     }
-                  ]
+                  ],
+                  "id": "Audio_TrackRow"
                 },
                 {
                   "type": "Container",
@@ -369,6 +370,17 @@
                                   "height": "@secondaryControlSize",
                                   "onPress": [
                                     {
+                                      "type": "ControlMedia",
+                                      "componentId": "videoPlayer",
+                                      "command": "pause"
+                                    },
+                                    {
+                                      "type": "SetValue",
+                                      "componentId": "Audio_TrackRow",
+                                      "property": "opacity",
+                                      "value": 0.4
+                                    },
+                                    {
                                       "type": "SendEvent",
                                       "arguments": [
                                         "Previous"
@@ -401,6 +413,17 @@
                                   "width": "@secondaryControlSize",
                                   "height": "@secondaryControlSize",
                                   "onPress": [
+                                    {
+                                      "type": "ControlMedia",
+                                      "componentId": "videoPlayer",
+                                      "command": "pause"
+                                    },
+                                    {
+                                      "type": "SetValue",
+                                      "componentId": "Audio_TrackRow",
+                                      "property": "opacity",
+                                      "value": 0.4
+                                    },
                                     {
                                       "type": "SendEvent",
                                       "arguments": [

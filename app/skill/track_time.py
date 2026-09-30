@@ -3,10 +3,12 @@
 
 The page plays MA's flow stream in a Video component, which has no idea
 where one track ends and the next begins: its position counts from the
-start of the stream. On a track change the skill asks MA once for the
-track's duration and elapsed time and sends the page an offset, so the
-page shows position - offset against the duration and keeps counting on
-its own (also through a local pause).
+start of the stream. The stream is the queue's tracks back to back, so
+a track starts in the video where the previous one ended: offset =
+previous offset + previous duration, and 0 for the first track of a page.
+On a track change the skill asks MA once for the duration and sends the
+page the offset; the page shows position - offset against the duration
+and keeps counting on its own (also through a local pause).
 
 Everything here is pure; the MA query lives in ma_control.
 """
@@ -44,8 +46,21 @@ def track_offset_ms(position_ms, elapsed_ms):
     return max(int(position_ms) - int(elapsed_ms), 0)
 
 
+def choose_offset_ms(previous_end_ms, position_ms, elapsed_ms):
+    """Where the current track started in the page's video, in ms, or None.
+
+    The end of the previous track when known; otherwise the video position
+    minus MA's elapsed time, which needs the position from the page.
+    """
+    if previous_end_ms is not None:
+        return previous_end_ms
+    if position_ms is not None and elapsed_ms is not None:
+        return track_offset_ms(position_ms, elapsed_ms)
+    return None
+
+
 class TrackChangeTracker:
-    """Remembers the last track key seen per APL session."""
+    """Remembers, per APL session, the track seen last and where it lies in the video."""
 
     def __init__(self, max_sessions=_MAX_SESSIONS):
         self._seen = OrderedDict()
@@ -59,14 +74,35 @@ class TrackChangeTracker:
         of the same change query only once.
         """
         with self._lock:
-            if self._seen.get(session_id) == key:
+            old = self._seen.get(session_id)
+            if old is not None and old["key"] == key:
                 self._seen.move_to_end(session_id)
                 return False
-            self._seen[session_id] = key
+            if old is None:
+                previous_end = 0   # a new page: its stream starts with this track
+            elif old["offset"] is not None and old["duration"]:
+                previous_end = old["offset"] + old["duration"]
+            else:
+                previous_end = None
+            self._seen[session_id] = {"key": key, "offset": None, "duration": None,
+                                      "previous_end": previous_end}
             self._seen.move_to_end(session_id)
             while len(self._seen) > self._max:
                 self._seen.popitem(last=False)
             return True
+
+    def previous_end(self, session_id):
+        """Where the previous track of this session ended in the video (ms), or None."""
+        with self._lock:
+            entry = self._seen.get(session_id)
+            return entry["previous_end"] if entry else None
+
+    def record(self, session_id, offset_ms, duration_ms):
+        """Remember where the current track lies, for the next change."""
+        with self._lock:
+            entry = self._seen.get(session_id)
+            if entry:
+                entry["offset"], entry["duration"] = offset_ms, duration_ms
 
 
 def set_track_time_commands(offset_ms, duration_ms):
