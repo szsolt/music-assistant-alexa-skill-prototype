@@ -1,4 +1,5 @@
 import os
+import sys
 from flask import Flask, request, jsonify, Response, g
 from flask_ask_sdk.skill_adapter import SkillAdapter
 from skill.lambda_function import sb  # sb is the SkillBuilder from skill/lambda_function.py
@@ -90,9 +91,11 @@ try:
         app.logger.info('Using ASK credentials under HOME=%s', ask_home)
 except Exception:
     pass
+# Without a skill ID ask-sdk skips the check that a request is meant for this skill.
+sb.skill_id = os.environ.get('SKILL_ID') or sys.exit('SKILL_ID is not set')
 skill_adapter = SkillAdapter(
     skill=sb.create(),
-    skill_id="", # pyright: ignore[reportArgumentType]
+    skill_id=sb.skill_id,
     app=app)
 
 # Mount the Music Assistant API (only ma routes will be mounted at /ma)
