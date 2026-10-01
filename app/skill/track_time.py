@@ -148,6 +148,11 @@ class TrackChangeTracker:
             entry = self._seen.get(session_id)
             return entry["previous_end"] if entry else None
 
+    def forget(self, session_id):
+        """The session's page has a new stream: its next track is a new page's first."""
+        with self._lock:
+            self._seen.pop(session_id, None)
+
     def record(self, session_id, offset_ms, duration_ms):
         """Remember where the current track lies, for the next change."""
         with self._lock:

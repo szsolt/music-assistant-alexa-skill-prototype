@@ -13,7 +13,7 @@ from ask_sdk_core.utils import is_request_type, is_intent_name
 from ask_sdk_core.handler_input import HandlerInput
 from ask_sdk_model import Response
 
-from . import data, util, device_mapping, ma_control, track_time
+from . import data, util, device_mapping, live_page, ma_control, track_time
 
 sb = StandardSkillBuilder()
 # sb = StandardSkillBuilder(
@@ -227,6 +227,7 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
         logger.info("Player page response built in %d ms (APL: %s)",
                     (time.monotonic() - started) * 1000, _supports_apl(handler_input))
         if _supports_apl(handler_input):
+            live_page.closed(_device_id_from(handler_input))
             _watch_page(_device_id_from(handler_input))
         return response
 
@@ -281,6 +282,8 @@ def _watch_page(device_id):
 
 def _page_heard_from(handler_input):
     """The Echo's page sent an event or closed: no resend needed."""
+    if not is_request_type("Alexa.Presentation.APL.UserEvent")(handler_input):
+        live_page.closed(_device_id_from(handler_input))
     with _page_watch_lock:
         timer = _page_watch.pop(_device_id_from(handler_input), None)
     if timer:
@@ -810,6 +813,7 @@ class APLUserEventHandler(AbstractRequestHandler):
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
         _page_heard_from(handler_input)
+        live_page.heard_from(_device_id_from(handler_input))
         arguments = _apl_event_arguments(handler_input)
         if arguments[0] == "Pause":
             # The page has paused itself; remember where, and pause MA too.
@@ -838,6 +842,15 @@ class APLUserEventHandler(AbstractRequestHandler):
             # it the refresh chain; restart it in case MA doesn't relaunch us.
             self._schedule_refresh(handler_input)
             return handler_input.response_builder.set_should_end_session(None).response
+
+        handed = live_page.take(_device_id_from(handler_input))
+        if handed:
+            commands = self._take_handoff(handler_input, *handed)
+            if commands:
+                util.execute_apl_commands(handler_input.response_builder, commands)
+            if handed[0] == "stream":
+                # the video starts the new stream at 0
+                arguments = ["MetadataRefresh", arguments[1] if len(arguments) > 1 else 0, 0]
 
         # Fetch latest metadata from Music Assistant
         changed = False
@@ -873,6 +886,23 @@ class APLUserEventHandler(AbstractRequestHandler):
         # Unset, not False: False opens the mic on every refresh and ducks the music;
         # the APL page keeps the session alive by itself.
         return handler_input.response_builder.set_should_end_session(None).response
+
+    @staticmethod
+    def _take_handoff(handler_input, command, value):
+        """APL commands for what MA handed this open page instead of speaking."""
+        logger.info("Open page takes %s from MA", command)
+        if command == "stream":
+            _track_changes.forget(_session_id_from(handler_input))
+            return [{"type": "PlayMedia", "componentId": "videoPlayer", "source": value,
+                     "audioTrack": "background"},
+                    {"type": "SetValue", "componentId": "AudioPlayerRoot",
+                     "property": "videoProgressValue", "value": 0}] + _UNDO_BUTTON_PRESS[1:]
+        if command == "pause":
+            return [{"type": "ControlMedia", "componentId": "videoPlayer", "command": "pause"}]
+        # resume: MA sends a new stream from the paused position, handed over the same way
+        if _resume_through_ma(handler_input) != "ok":
+            return [{"type": "ControlMedia", "componentId": "videoPlayer", "command": "play"}]
+        return []
 
     @staticmethod
     def _schedule_refresh(handler_input):

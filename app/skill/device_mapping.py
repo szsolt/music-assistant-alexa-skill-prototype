@@ -59,6 +59,13 @@ def get_player_for_device(device_id):
     return load_mapping().get(device_id)
 
 
+def get_devices_for_player(player_id):
+    """The device_ids paired with player_id."""
+    if not player_id:
+        return []
+    return [d for d, p in load_mapping().items() if p == player_id]
+
+
 def set_player_for_device(device_id, player_id):
     mapping = load_mapping()
     if player_id:

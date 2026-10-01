@@ -4,7 +4,11 @@ from flask import jsonify, request
 import os
 import time
 from urllib.parse import urlparse, urlunparse
+import logging
 import shared_store
+from skill import device_mapping, live_page, ma_control
+
+logger = logging.getLogger(__name__)
 
 
 def _rewrite_url(url: str) -> str:
@@ -25,6 +29,32 @@ def _rewrite_url(url: str) -> str:
         return rewritten
     except Exception:
         return url
+
+
+def _resend_spoken(player_id):
+    """For a hand-off the page missed: have MA send the stream the spoken way."""
+    def missed(device_id, command):
+        if command in ("stream", "resume"):
+            logger.warning("Open page on %s missed the %s hand-off: asking MA to resend", player_id, command)
+            if ma_control.resume_at(player_id) is None:
+                logger.warning("MA did not resend the stream for %s", player_id)
+    return missed
+
+
+def _offer_to_open_page(data, command, value=None):
+    """True if an open page of MA's player takes command, so MA needn't speak.
+
+    Only when MA says it can leave its utterance out: an MA that speaks
+    anyway brings up a new page, and the open one must not switch as well.
+    """
+    player_id = data.get('playerId')
+    if not data.get('canSkipSpeech') or not player_id:
+        return False
+    for device_id in device_mapping.get_devices_for_player(player_id):
+        if live_page.offer(device_id, command, value, on_missed=_resend_spoken(player_id)):
+            logger.info("Handing %s to the open page on %s", command, player_id)
+            return True
+    return False
 
 
 def register_routes(bp):
@@ -48,7 +78,17 @@ def register_routes(bp):
             'version': shared_store._version,
             'timestamp': time.time()
         }
-        return jsonify({'status': 'ok', 'version': shared_store._version})
+        page_live = _offer_to_open_page(data, 'stream', stream_url)
+        return jsonify({'status': 'ok', 'version': shared_store._version, 'pageLive': page_live})
+
+    @bp.route('/control', methods=['POST'])
+    def control():
+        """MA's pause/resume: {playerId, command, canSkipSpeech}; pageLive: leave it to us."""
+        data = request.get_json(silent=True) or {}
+        command = data.get('command')
+        if command not in ('pause', 'resume'):
+            return jsonify({'error': 'Unsupported command'}), 400
+        return jsonify({'status': 'ok', 'pageLive': _offer_to_open_page(data, command)})
 
     @bp.route('/latest-url', methods=['GET'])
     def latest_url():
