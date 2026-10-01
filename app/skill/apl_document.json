@@ -279,21 +279,39 @@
                       "justifyContent": "end",
                       "items": [
                         {
-                          "type": "Text",
-                          "id": "Audio_PrimaryText",
-                          "accessibilityLabel": "${primaryText}",
-                          "text": "${primaryText}",
-                          "style": "textStyleDisplay4",
-                          "textAlign": "${@viewportProfile != @hubRoundSmall ? 'auto' : 'center'}",
-                          "paddingBottom": "@spacingXSmall"
-                        },
-                        {
-                          "type": "Text",
-                          "id": "Audio_SecondaryText",
-                          "accessibilityLabel": "${secondaryText}",
-                          "text": "${secondaryText}",
-                          "style": "textStyleBody",
-                          "textAlign": "${@viewportProfile != @hubRoundSmall ? 'auto' : 'center'}"
+                          "description": "Dark panel behind title and artist, readable on any background.",
+                          "type": "Frame",
+                          "id": "Audio_TextPanel",
+                          "backgroundColor": "rgba(0,0,0,0.5)",
+                          "borderRadius": "16dp",
+                          "paddingLeft": "@spacingSmall",
+                          "paddingRight": "@spacingSmall",
+                          "paddingTop": "@spacingXSmall",
+                          "paddingBottom": "@spacingXSmall",
+                          "item": {
+                            "type": "Container",
+                            "direction": "column",
+                            "alignItems": "${@viewportProfile != @hubRoundSmall ? 'start' : 'bottom'}",
+                            "items": [
+                              {
+                                "type": "Text",
+                                "id": "Audio_PrimaryText",
+                                "accessibilityLabel": "${primaryText}",
+                                "text": "${primaryText}",
+                                "style": "textStyleDisplay4",
+                                "textAlign": "${@viewportProfile != @hubRoundSmall ? 'auto' : 'center'}",
+                                "paddingBottom": "@spacingXSmall"
+                              },
+                              {
+                                "type": "Text",
+                                "id": "Audio_SecondaryText",
+                                "accessibilityLabel": "${secondaryText}",
+                                "text": "${secondaryText}",
+                                "style": "textStyleBody",
+                                "textAlign": "${@viewportProfile != @hubRoundSmall ? 'auto' : 'center'}"
+                              }
+                            ]
+                          }
                         }
                       ]
                     }
