@@ -272,7 +272,8 @@ def pause(text, response_builder, supports_apl=False, session_new=False):
                     add_apl(response_builder, start_paused=True)
                 except Exception:
                     logging.exception('Failed to re-render APL on session new')
-                response_builder.set_should_end_session(False)
+                # Unset, not False: False opens the mic (as for the refresh).
+                response_builder.set_should_end_session(None)
             else:
                 cmd = ControlMediaCommand(command=MediaCommandType.pause, component_id="videoPlayer")
                 response_builder.add_directive(
@@ -280,7 +281,7 @@ def pause(text, response_builder, supports_apl=False, session_new=False):
                         commands=[cmd],
                         token="playbackToken"
                     )
-                ).set_should_end_session(False)
+                ).set_should_end_session(None)
         except Exception:
             logging.exception('Failed to add APL pause command; falling back to Stop')
             response_builder.add_directive(StopDirective())

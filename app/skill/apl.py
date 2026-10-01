@@ -22,6 +22,18 @@ def _load_apl_template():
         return json.load(f)
 
 
+def _components(node):
+    """Every component dict in an APL layout tree, depth first."""
+    if isinstance(node, dict):
+        if "type" in node:
+            yield node
+        for key in ("item", "items"):
+            yield from _components(node.get(key))
+    elif isinstance(node, list):
+        for child in node:
+            yield from _components(child)
+
+
 def add_apl(response_builder, start_paused=False):
     # type: (ResponseFactory, bool) -> None
     """Add the RenderDocumentDirective to the response with APL document."""
@@ -53,18 +65,11 @@ def add_apl(response_builder, start_paused=False):
     # Set the dynamic autoplay value based on start_paused
     autoplay = not start_paused
 
-    # Update autoplay in Video component and AlexaTransportControls
-    try:
-        video_component = apl_document["layouts"]["AudioPlayer"]["item"][0]["items"][2]["items"][1]["items"][0]
-        video_component["autoplay"] = autoplay
-    except (KeyError, IndexError):
-        logging.debug("Could not set video autoplay in APL template")
-
-    try:
-        transport_controls = apl_document["layouts"]["AudioPlayer"]["item"][0]["items"][2]["items"][1]["items"][1]["items"][0]["item"][1]
-        transport_controls["autoplay"] = autoplay
-    except (KeyError, IndexError):
-        logging.debug("Could not set transport autoplay in APL template")
+    # Update autoplay in the Video component and AlexaTransportControls,
+    # found by type: their place in the layout changes with the page design.
+    for component in _components(apl_document["layouts"]["AudioPlayer"]):
+        if component.get("type") in ("Video", "AlexaTransportControls"):
+            component["autoplay"] = autoplay
 
     # Update mainTemplate with metadata values
     try:
