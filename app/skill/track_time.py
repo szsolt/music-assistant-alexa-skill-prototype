@@ -31,6 +31,11 @@ def track_key(info):
             info.get('secondaryText') or '')
 
 
+def title_key(info):
+    """The track by title and artist only: MA's resume gives it a new stream URL."""
+    return track_key(info)[1:]
+
+
 def video_position_ms(arguments, index=2):
     """A position in ms from an APL event's arguments, or None.
 
@@ -64,7 +69,8 @@ def choose_offset_ms(previous_end_ms, position_ms, elapsed_ms):
     return None
 
 
-def page_start_offset_ms(position_ms, paused, paused_at_ms, elapsed_ms, stream_start_ms):
+def page_start_offset_ms(position_ms, paused, paused_at_ms, elapsed_ms, stream_start_ms,
+                         ma_paused_ms=None):
     """trackOffset for the first track of a new page.
 
     - Opened paused (a pause from MA reopens the page at the stream's start):
@@ -72,9 +78,10 @@ def page_start_offset_ms(position_ms, paused, paused_at_ms, elapsed_ms, stream_s
       else MA's elapsed time.
     - Opened by a resume: MA's new stream starts stream_start_ms into the
       track, so the video's 0 is that point of the track.
-    - Opened by MA resuming on its own (play in MA after the page closed):
-      MA's elapsed time is well ahead of the video, so the stream started
-      that far into the track.
+    - Opened by MA resuming on its own (play in MA while the page was
+      closed): MA resumes where it paused, ma_paused_ms into the track, if
+      the skill saw that pause; else, if MA's elapsed time is well ahead
+      of the video, the stream started that far into the track.
     - Otherwise the stream starts with the track: 0.
     """
     if paused:
@@ -82,6 +89,8 @@ def page_start_offset_ms(position_ms, paused, paused_at_ms, elapsed_ms, stream_s
         return (position_ms or 0) - (stopped_at or 0)
     if stream_start_ms is not None:
         return -stream_start_ms
+    if ma_paused_ms is not None:
+        return -ma_paused_ms
     if elapsed_ms is not None and elapsed_ms - (position_ms or 0) > _MID_TRACK_START_MS:
         return (position_ms or 0) - elapsed_ms
     return 0

@@ -89,7 +89,11 @@ logging.basicConfig(
     datefmt="%H:%M:%S %Y-%m-%d %z"
 )
 
-supports_apl = False
+
+def _supports_apl(handler_input):
+    """Whether the requesting device renders APL (set per request by the interceptor)."""
+    return bool(handler_input.attributes_manager.request_attributes.get("supports_apl"))
+
 
 def _get_stream_url(request):
     """Return (url, audio_data) where url is resolved from util.audio_data.
@@ -179,6 +183,12 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
         logger.info("In LaunchRequestOrPlayAudioHandler")
 
         _ = handler_input.attributes_manager.request_attributes["_"]
+        # "Alexa, open music assistant" while MA is paused: resume MA where it
+        # paused. The stored URL would replay the track from its start while
+        # MA stays paused. (PlayAudio is MA itself sending a new stream.)
+        if (is_request_type("LaunchRequest")(handler_input) and _ma_paused(handler_input)
+                and _resume_through_ma(handler_input) == "ok"):
+            return handler_input.response_builder.set_should_end_session(True).response
         request = handler_input.request_envelope.request
         url, _audio = _get_stream_url(request)
         logger.info("URL from util.audio_data: %s", url)
@@ -200,13 +210,19 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
             return handler_input.response_builder.response
 
         logger.info("Playing URL: %s", url)
-        return util.play(
+        started = time.monotonic()
+        response = util.play(
             url=url,
             offset=0,
             text=data.WELCOME_MSG,
             response_builder=handler_input.response_builder,
-            supports_apl=supports_apl
+            supports_apl=_supports_apl(handler_input)
         )
+        # Alexa drops a response that takes over ~8 s: then the page never
+        # shows, or shows without ever sending a refresh.
+        logger.info("Player page response built in %d ms (APL: %s)",
+                    (time.monotonic() - started) * 1000, _supports_apl(handler_input))
+        return response
 
 
 class HelpIntentHandler(AbstractRequestHandler):
@@ -220,9 +236,7 @@ class HelpIntentHandler(AbstractRequestHandler):
         logger.info("In HelpIntentHandler")
         _ = handler_input.attributes_manager.request_attributes["_"]
         handler_input.response_builder.speak(
-            _(data.HELP_MSG).format(
-                util.audio_data(
-                    handler_input.request_envelope.request))
+            _(data.HELP_MSG).format(_SKILL_NAME)
         ).set_should_end_session(False)
         return handler_input.response_builder.response
 
@@ -256,13 +270,21 @@ def _device_id_from(handler_input):
         return None
 
 
-def _sync_to_ma_unless_echo(handler_input, command):
+def _ma_paused(handler_input):
+    """True if the MA player paired with the requesting Echo is paused."""
+    player_id = device_mapping.get_player_for_device(_device_id_from(handler_input))
+    return bool(player_id) and ma_control.is_paused(player_id)
+
+
+def _sync_to_ma_unless_echo(handler_input, command, unless_paused=False):
     """Best-effort: forward pause/stop/resume to MA, unless this request is
     the echo of a command we ourselves just triggered on MA (see ma_control
     docstring for why that echo happens and must be suppressed once).
 
     Always lets the caller's normal Alexa-side action proceed regardless of
     outcome here - this is a secondary sync, not the primary response.
+
+    unless_paused: leave a paused MA as it is (see CancelOrStopIntentHandler).
     """
     device_id = _device_id_from(handler_input)
 
@@ -272,6 +294,9 @@ def _sync_to_ma_unless_echo(handler_input, command):
 
     player_id = device_mapping.get_player_for_device(device_id)
     if not player_id:
+        return
+    if unless_paused and ma_control.is_paused(player_id):
+        logger.info("Not sending %s to MA player %s: it is paused", command, player_id)
         return
 
     ma_control.mark_ma_triggered(device_id, command)
@@ -342,8 +367,11 @@ class CancelOrStopIntentHandler(AbstractRequestHandler):
         # type: (HandlerInput) -> Response
         logger.info("In CancelOrStopIntentHandler")
         _ = handler_input.attributes_manager.request_attributes["_"]
-        _sync_to_ma_unless_echo(handler_input, "stop")
-        return util.stop(_(data.STOP_MSG), handler_input.response_builder, supports_apl=supports_apl)
+        # The Show closes a paused page after ~30 s and then sends this Stop.
+        # MA stays paused: play in MA then resumes through us at the paused
+        # position, where a stopped MA would start a stream we can't place.
+        _sync_to_ma_unless_echo(handler_input, "stop", unless_paused=True)
+        return util.stop(_(data.STOP_MSG), handler_input.response_builder, supports_apl=_supports_apl(handler_input))
 
 
 class PauseIntentHandler(AbstractRequestHandler):
@@ -364,7 +392,7 @@ class PauseIntentHandler(AbstractRequestHandler):
 
         return util.pause(text=None,
                   response_builder=handler_input.response_builder,
-                  supports_apl=supports_apl,
+                  supports_apl=_supports_apl(handler_input),
                   session_new=session_new)
 
 
@@ -400,7 +428,7 @@ class ResumeIntentHandler(AbstractRequestHandler):
             offset=offset,
             text=data.WELCOME_MSG,
             response_builder=handler_input.response_builder,
-            supports_apl=supports_apl
+            supports_apl=_supports_apl(handler_input)
         )
 
 
@@ -575,7 +603,7 @@ class PlaybackFailedHandler(AbstractRequestHandler):
             offset=0, 
             text=None,
             response_builder=handler_input.response_builder,
-            supports_apl=supports_apl
+            supports_apl=_supports_apl(handler_input)
         )
 
 
@@ -606,11 +634,28 @@ _UNDO_BUTTON_PRESS = [
 ]
 _track_changes = track_time.TrackChangeTracker()
 
-# Per Echo: where the page was paused (ms into the track), and where the
-# stream of our last resume starts (ms into the track, valid until).
+_SKILL_NAME = "Music Assistant"
+
+# Per Echo, each (title key, ms into the track): where the page was paused,
+# and where MA paused (its elapsed time on the paused page). Where the
+# stream of our last resume starts: (ms into the track, valid until).
 _STREAM_START_TTL_SECONDS = 60
 _paused_at = {}
+_ma_paused_at = {}
 _stream_start = {}
+
+
+def _remember(store, device_id, position_ms):
+    if device_id and position_ms is not None:
+        store[device_id] = (track_time.title_key(data.info), position_ms)
+
+
+def _recall(store, device_id):
+    """The position kept in store for this Echo, if it is for the current track."""
+    entry = store.get(device_id)
+    if entry and entry[0] == track_time.title_key(data.info):
+        return entry[1]
+    return None
 
 
 def _take_stream_start(device_id):
@@ -630,11 +675,12 @@ def _resume_through_ma(handler_input, position_ms=None):
         logger.info("No MA player mapped for device_id=%s", (device_id or '')[-8:])
         return "unmapped"
     if position_ms is None:
-        position_ms = _paused_at.get(device_id)
+        position_ms = _recall(_paused_at, device_id)
     start = ma_control.resume_at(player_id, position_ms)
     if start is None:
         return "failed"
     _paused_at.pop(device_id, None)
+    _ma_paused_at.pop(device_id, None)
     _stream_start[device_id] = (start, time.time() + _STREAM_START_TTL_SECONDS)
     logger.info("Resuming %s at %s ms", player_id, start)
     return "ok"
@@ -671,10 +717,14 @@ def _track_time_commands(handler_input, arguments):
     position_ms = track_time.video_position_ms(arguments)
     previous_end = _track_changes.previous_end(session_id)
     if previous_end == 0:   # a new page
-        offset = track_time.page_start_offset_ms(position_ms, paused, _paused_at.get(device_id),
-                                                 elapsed_ms, _take_stream_start(device_id))
-        if not paused:
+        offset = track_time.page_start_offset_ms(position_ms, paused, _recall(_paused_at, device_id),
+                                                 elapsed_ms, _take_stream_start(device_id),
+                                                 _recall(_ma_paused_at, device_id))
+        if paused:
+            _remember(_ma_paused_at, device_id, elapsed_ms)
+        else:
             _paused_at.pop(device_id, None)
+            _ma_paused_at.pop(device_id, None)
     else:
         offset = track_time.choose_offset_ms(previous_end, position_ms, elapsed_ms)
     _track_changes.record(session_id, offset, duration_ms)
@@ -708,8 +758,7 @@ class APLUserEventHandler(AbstractRequestHandler):
             # MA's provider then pauses the Echo, which reopens the page paused.
             position_ms = track_time.video_position_ms(arguments, index=1)
             logger.info("APL pause button at %s ms", position_ms)
-            if position_ms is not None:
-                _paused_at[_device_id_from(handler_input)] = position_ms
+            _remember(_paused_at, _device_id_from(handler_input), position_ms)
             _sync_to_ma_unless_echo(handler_input, "pause")
             self._schedule_refresh(handler_input)
             return handler_input.response_builder.set_should_end_session(None).response
@@ -796,6 +845,9 @@ class PlayCommandHandler(AbstractRequestHandler):
         # type: (HandlerInput) -> Response
         logger.info("In PlayCommandHandler")
         _ = handler_input.attributes_manager.request_attributes["_"]
+        # As "Alexa, resume": MA sends a new stream from the paused position.
+        if _resume_through_ma(handler_input) == "ok":
+            return handler_input.response_builder.response
         request = handler_input.request_envelope.request
         url, _audio = _get_stream_url(request)
         if not url:
@@ -809,7 +861,7 @@ class PlayCommandHandler(AbstractRequestHandler):
             offset=0,
             text=None,
             response_builder=handler_input.response_builder,
-            supports_apl=supports_apl
+            supports_apl=_supports_apl(handler_input)
         )
 
 
@@ -853,9 +905,10 @@ class PauseCommandHandler(AbstractRequestHandler):
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
         logger.info("In PauseCommandHandler")
+        _sync_to_ma_unless_echo(handler_input, "pause")
         return util.stop(text=None,
                          response_builder=handler_input.response_builder,
-                         supports_apl=supports_apl)
+                         supports_apl=_supports_apl(handler_input))
 
 # ###################################################################
 
@@ -872,11 +925,13 @@ class CatchAllExceptionHandler(AbstractExceptionHandler):
         # type: (HandlerInput, Exception) -> Response
         logger.info("In CatchAllExceptionHandler")
         logger.error(exception, exc_info=True)
-        _ = handler_input.attributes_manager.request_attributes["_"]
-        handler_input.response_builder.speak(_(data.UNHANDLED_MSG)).ask(
-            _(data.HELP_MSG).format(
-                util.audio_data(handler_input.request_envelope.request)))
-
+        # Page events and player requests run during playback, and Alexa
+        # rejects speech in AudioPlayer/PlaybackController responses: stay silent.
+        req_type = getattr(handler_input.request_envelope.request, 'object_type', '') or ''
+        if req_type.startswith(("Alexa.Presentation.APL.", "AudioPlayer.", "PlaybackController.")):
+            return handler_input.response_builder.response
+        _ = handler_input.attributes_manager.request_attributes.get("_", gettext.gettext)
+        handler_input.response_builder.speak(_(data.UNHANDLED_MSG)).set_should_end_session(True)
         return handler_input.response_builder.response
 
 # ###################################################################
@@ -884,16 +939,20 @@ class CatchAllExceptionHandler(AbstractExceptionHandler):
 # ############# REQUEST / RESPONSE INTERCEPTORS #####################
 
 class APLSupportRequestInterceptor(AbstractRequestInterceptor):
-    """Request Interceptor to check if the device supports APL and update the global supports_apl variable."""
+    """Record per request whether the device supports APL.
+
+    A request attribute, not a module global: requests from different
+    Echos are handled concurrently.
+    """
     def process(self, handler_input):
-        global supports_apl
-        if hasattr(handler_input, 'request_envelope'):
+        try:
             supported_interfaces = getattr(
                 handler_input.request_envelope.context.system.device.supported_interfaces,
                 'alexa_presentation_apl', None)
-            supports_apl = supported_interfaces is not None
-        else:
-            supports_apl = False
+        except AttributeError:
+            supported_interfaces = None
+        handler_input.attributes_manager.request_attributes["supports_apl"] = (
+            supported_interfaces is not None)
 
 class RequestLogger(AbstractRequestInterceptor):
     """Log the alexa requests."""

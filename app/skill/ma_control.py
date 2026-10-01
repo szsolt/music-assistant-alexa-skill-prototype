@@ -170,6 +170,12 @@ def get_current_track_time(player_id):
     return None
 
 
+def is_paused(player_id):
+    """True if MA's queue on player_id is paused (False if unknown)."""
+    result = get_current_track_time(player_id)
+    return bool(result and result[2])
+
+
 async def _resume_at(server_url, token, player_id, position_ms):
     async with aiohttp.ClientSession() as session:
         async with MusicAssistantClient(server_url, session, token=token) as client:

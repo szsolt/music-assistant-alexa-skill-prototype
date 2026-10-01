@@ -104,6 +104,16 @@ def test_page_start_offset():
     # reopened by MA's own resume at 2:34: the stream starts mid-track
     assert tt.page_start_offset_ms(1_000, False, None, 154_000, None) == -153_000
     assert tt.page_start_offset_ms(None, False, None, 154_000, None) == -154_000
+    # ... at 9.5 s, where the skill saw MA pause: below the elapsed-time guess
+    assert tt.page_start_offset_ms(1_000, False, None, 12_300, None, 9_569) == -9_569
+    # our own resume wins over MA's pause position
+    assert tt.page_start_offset_ms(300, False, None, 4_000, 61_000, 9_569) == -61_000
+
+
+def test_title_key_ignores_stream_url():
+    a = {"audioSources": "https://h/flow/a/x.mp3", "primaryText": "T", "secondaryText": "A"}
+    b = dict(a, audioSources="https://h/flow/b/x.mp3")
+    assert tt.title_key(a) == tt.title_key(b) == ("T", "A")
     # reopened paused after a screen pause at 61 s
     assert tt.page_start_offset_ms(0, True, 61_000, 75_000, None) == -61_000
     # reopened paused by a pause from MA: MA's elapsed time
