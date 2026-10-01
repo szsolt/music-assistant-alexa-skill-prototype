@@ -26,7 +26,9 @@ COMMANDS = ("stream", "pause", "resume")
 
 _lock = threading.Lock()
 _last_event = {}   # device_id -> monotonic time of the page's last event
-_handoff = {}      # device_id -> (command, value, Timer)
+# device_id -> hand-offs in the order the page takes them, each
+# [command, value, on_missed, Timer]: at most a stream and a pause after it.
+_handoff = {}
 
 
 def heard_from(device_id, now=None):
@@ -40,9 +42,9 @@ def closed(device_id):
     """The device's page closed or was replaced: no open page, no hand-off."""
     with _lock:
         _last_event.pop(device_id, None)
-        entry = _handoff.pop(device_id, None)
-    if entry:
-        entry[2].cancel()
+        entries = _handoff.pop(device_id, [])
+    for entry in entries:
+        _disarm(entry)
 
 
 def is_live(device_id, now=None):
@@ -55,48 +57,72 @@ def is_live(device_id, now=None):
 def offer(device_id, command, value=None, on_missed=None):
     """Hand command to the device's open page. False if it has none.
 
-    The page takes it with its next refresh (take()); a later offer
-    replaces an untaken one. on_missed(device_id, command) runs if the
-    page doesn't take it within HANDOFF_SECONDS.
+    The page takes it with its next refresh (take()). A stream replaces
+    whatever the page hasn't taken yet. A pause or resume behind an untaken
+    stream waits for it: the page loads the new track first, then pauses
+    it (a resume adds nothing, the new track plays). Otherwise it replaces
+    an untaken one. If the page doesn't take one within HANDOFF_SECONDS of it becoming the
+    next, on_missed(device_id, command) of the latest one runs.
     """
     if command not in COMMANDS:
         raise ValueError(command)
     if not device_id or not is_live(device_id):
         return False
-
-    def missed():
-        with _lock:
-            entry = _handoff.get(device_id)
-            if not entry or entry[2] is not timer:
-                return
-            del _handoff[device_id]
-            _last_event.pop(device_id, None)   # not open after all
-        if on_missed:
-            on_missed(device_id, command)
-
-    timer = threading.Timer(HANDOFF_SECONDS, missed)
-    timer.daemon = True
+    entry = [command, value, on_missed, None]
     with _lock:
-        old = _handoff.pop(device_id, None)
-        _handoff[device_id] = (command, value, timer)
-    if old:
-        old[2].cancel()
-    timer.start()
+        queue = _handoff.get(device_id, [])
+        if command != "stream" and queue and queue[0][0] == "stream":
+            dropped, kept = queue[1:], queue[:1]
+            if command == "pause":
+                kept.append(entry)
+        else:
+            dropped, kept = queue, [entry]
+            _arm(device_id, entry)
+        _handoff[device_id] = kept
+    for old in dropped:
+        _disarm(old)
     return True
 
 
 def take(device_id, command=None):
-    """(command, value) handed to the device's page, or None; once.
+    """(command, value) handed to the device's page, or None; once, in order.
 
     With command, only a hand-off of that command is taken.
     """
     with _lock:
-        entry = _handoff.get(device_id)
-        if entry and command is not None and entry[0] != command:
-            entry = None
-        if entry:
+        queue = _handoff.get(device_id)
+        if not queue or (command is not None and queue[0][0] != command):
+            return None
+        entry = queue.pop(0)
+        if queue:
+            _arm(device_id, queue[0])
+        else:
             del _handoff[device_id]
-    if not entry:
-        return None
-    entry[2].cancel()
+    _disarm(entry)
     return entry[0], entry[1]
+
+
+def _arm(device_id, entry):
+    """Start entry's wait for the page; call with _lock held."""
+    def missed():
+        with _lock:
+            queue = _handoff.get(device_id)
+            if not queue or queue[0] is not entry:
+                return
+            queue = _handoff.pop(device_id)
+            _last_event.pop(device_id, None)   # not open after all
+        for old in queue[1:]:
+            _disarm(old)
+        # MA's latest command counts: a stream with a pause behind it falls back as a pause.
+        latest = queue[-1]
+        if latest[2]:
+            latest[2](device_id, latest[0])
+
+    entry[3] = threading.Timer(HANDOFF_SECONDS, missed)
+    entry[3].daemon = True
+    entry[3].start()
+
+
+def _disarm(entry):
+    if entry[3]:
+        entry[3].cancel()
