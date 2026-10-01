@@ -81,7 +81,9 @@ def page_start_offset_ms(position_ms, paused, paused_at_ms, elapsed_ms, stream_s
     - Opened by MA resuming on its own (play in MA while the page was
       closed): MA resumes where it paused, ma_paused_ms into the track, if
       the skill saw that pause; else, if MA's elapsed time is well ahead
-      of the video, the stream started that far into the track.
+      of the video, the stream started that far into the track. (Not for
+      a replay of an old stream URL: MA restarts that flow where it first
+      started while its clock runs on, so the skill never replays one.)
     - Otherwise the stream starts with the track: 0.
     """
     if paused:

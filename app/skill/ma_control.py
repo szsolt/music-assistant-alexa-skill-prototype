@@ -182,14 +182,15 @@ async def _resume_at(server_url, token, player_id, position_ms):
             queue = await client.player_queues.get_active_queue(player_id)
             if queue is None or queue.current_item is None:
                 raise ValueError(f"No active queue/current track for player {player_id}")
-            position = track_time.resume_position_s(position_ms, queue.elapsed_time,
+            # corrected: where a playing queue is now, not at its last update
+            position = track_time.resume_position_s(position_ms, queue.corrected_elapsed_time,
                                                     queue.current_item.duration)
             await client.player_queues.seek(queue.queue_id, position)
             return position * 1000
 
 
 def resume_at(player_id, position_ms=None):
-    """Resume MA's current track at position_ms (default: where MA paused).
+    """Resume MA's current track at position_ms (default: where MA is).
 
     Returns the position used, in ms, or None on failure.
 

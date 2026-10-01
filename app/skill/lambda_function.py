@@ -183,10 +183,12 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
         logger.info("In LaunchRequestOrPlayAudioHandler")
 
         _ = handler_input.attributes_manager.request_attributes["_"]
-        # "Alexa, open music assistant" while MA is paused: resume MA where it
-        # paused. The stored URL would replay the track from its start while
-        # MA stays paused. (PlayAudio is MA itself sending a new stream.)
-        if (is_request_type("LaunchRequest")(handler_input) and _ma_paused(handler_input)
+        # "Alexa, open music assistant": MA sends a new stream at its own
+        # position, paused or playing. Replaying the stored URL makes MA
+        # restart that flow where it first started it, while MA's clock (and
+        # with it track time and the next title) runs on from the old start.
+        # PlayAudio is MA itself sending a new stream: play that.
+        if (is_request_type("LaunchRequest")(handler_input)
                 and _resume_through_ma(handler_input) == "ok"):
             return handler_input.response_builder.set_should_end_session(True).response
         request = handler_input.request_envelope.request
@@ -268,12 +270,6 @@ def _device_id_from(handler_input):
         return handler_input.request_envelope.context.system.device.device_id
     except Exception:
         return None
-
-
-def _ma_paused(handler_input):
-    """True if the MA player paired with the requesting Echo is paused."""
-    player_id = device_mapping.get_player_for_device(_device_id_from(handler_input))
-    return bool(player_id) and ma_control.is_paused(player_id)
 
 
 def _sync_to_ma_unless_echo(handler_input, command, unless_paused=False):
