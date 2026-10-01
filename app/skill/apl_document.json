@@ -191,6 +191,34 @@
               "name": "refreshTick",
               "type": "number",
               "value": 0
+            },
+            {
+              "name": "queueEnd",
+              "type": "number",
+              "value": 0
+            }
+          ],
+          "handleTick": [
+            {
+              "description": "At the end of MA's queue (video ms, set by the skill on its last track) pause, so the Show doesn't ask for the ended stream again, and tell the skill. Here, not in the skill's commands: those can't read this component's binds.",
+              "minimumDelay": 250,
+              "when": "${queueEnd > 0 && videoPlaying && videoProgressValue >= queueEnd - 1000}",
+              "commands": [
+                {
+                  "type": "SetValue",
+                  "property": "queueEnd",
+                  "value": 0
+                },
+                {
+                  "type": "ControlMedia",
+                  "componentId": "videoPlayer",
+                  "command": "pause"
+                },
+                {
+                  "type": "SendEvent",
+                  "arguments": ["QueueEnded"]
+                }
+              ]
             }
           ],
           "onMount": [

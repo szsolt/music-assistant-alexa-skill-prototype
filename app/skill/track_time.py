@@ -19,13 +19,6 @@ from collections import OrderedDict
 # Sessions remembered for change detection; old ones fall out.
 _MAX_SESSIONS = 32
 
-# The page's refreshes come ~2.5 s apart: one of them falls within this
-# of the queue's end, and plans the stop at the end.
-_QUEUE_END_WINDOW_MS = 4_000
-# Stop this much before the end: the Show asks for an ended stream again
-# at once, and MA answers that by restarting the old flow.
-_QUEUE_END_MARGIN_MS = 1_000
-
 # A new page whose stream MA started further into the track than this
 # started mid-track (MA's own resume); below it, it's startup delay.
 _MID_TRACK_START_MS = 15_000
@@ -179,37 +172,17 @@ class TrackChangeTracker:
             return entry["offset"] + entry["duration"]
 
 
-def queue_end_commands(position_ms, end_ms, refresh_event):
-    """APL commands that stop the page at the queue's end, or None if it's not near.
-
-    They wait out the rest of the last track, pause the video and send
-    QueueEnded. A page paused meanwhile sends refresh_event instead and is
-    left alone. They replace the refresh: the answer to either event goes on.
-    """
-    if end_ms is None or position_ms is None:
-        return None
-    remaining = end_ms - position_ms
-    if remaining > _QUEUE_END_WINDOW_MS:
-        return None
-    return [
-        {"type": "Idle", "delay": max(remaining - _QUEUE_END_MARGIN_MS, 0)},
-        {"type": "Sequential", "when": "${!videoPlaying}", "commands": [refresh_event]},
-        {"type": "Sequential", "when": "${videoPlaying}", "commands": [
-            {"type": "ControlMedia", "componentId": "videoPlayer", "command": "pause"},
-            {"type": "SendEvent", "arguments": ["QueueEnded"]},
-        ]},
-    ]
-
-
-def set_track_time_commands(offset_ms, duration_ms, shown_ms=None):
+def set_track_time_commands(offset_ms, duration_ms, shown_ms=None, queue_end_ms=None):
     """APL SetValue commands for the page's trackOffset and trackDuration.
 
     offset_ms None leaves the offset as it is; duration_ms None or 0 shows
     no length (unknown, e.g. radio). shown_ms sets the slider's position
     directly, for a paused page: the slider only follows the video's time
-    updates, and a paused video sends none.
+    updates, and a paused video sends none. queue_end_ms: where MA's queue
+    ends in the video, on its last track (the page stops there); else 0.
     """
-    commands = []
+    commands = [{"type": "SetValue", "componentId": "AudioPlayerRoot",
+                 "property": "queueEnd", "value": int(queue_end_ms or 0)}]
     if offset_ms is not None:
         commands.append({"type": "SetValue", "componentId": "AudioPlayerRoot",
                          "property": "trackOffset", "value": int(offset_ms)})

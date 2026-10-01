@@ -791,7 +791,8 @@ def _track_time_commands(handler_input, arguments):
     logger.info("Track time for %s: duration=%s ms elapsed=%s ms paused=%s offset=%s ms last=%s",
                 player_id, duration_ms, elapsed_ms, paused, offset, last)
     shown = (position_ms or 0) - offset if paused and offset is not None else None
-    return track_time.set_track_time_commands(offset, duration_ms, shown)
+    return track_time.set_track_time_commands(offset, duration_ms, shown,
+                                              _track_changes.queue_end_ms(session_id))
 
 
 class APLUserEventHandler(AbstractRequestHandler):
@@ -898,17 +899,6 @@ class APLUserEventHandler(AbstractRequestHandler):
         # The media command runs next to the refresh timer: whether or not it
         # completes before the stream plays, the refreshes go on.
         refresh = util.apl_refresh_commands()
-        if not media:
-            position_ms = track_time.video_position_ms(arguments)
-            end_ms = _track_changes.queue_end_ms(_session_id_from(handler_input))
-            if end_ms is not None:
-                logger.info("Last track: page at %s ms, queue ends at %s ms%s", position_ms, end_ms,
-                            " (page not playing)" if "notPlaying" in arguments else "")
-            not_playing = dict(refresh[-1], arguments=refresh[-1]["arguments"] + ["notPlaying"])
-            end = track_time.queue_end_commands(position_ms, end_ms, not_playing)
-            if end:
-                logger.info("Stopping the page at the queue's end, in %s ms", end[0]["delay"])
-                refresh = end
         if media:
             refresh = [{"type": "Parallel",
                         "commands": media + [{"type": "Sequential", "commands": refresh}]}]

@@ -50,13 +50,13 @@ def test_track_key_uses_stream_and_titles():
 
 def test_set_track_time_commands():
     cmds = tt.set_track_time_commands(388_000, 215_000)
-    assert [(c["property"], c["value"]) for c in cmds] == [("trackOffset", 388_000), ("trackDuration", 215_000)]
+    assert [(c["property"], c["value"]) for c in cmds] == [("queueEnd", 0), ("trackOffset", 388_000), ("trackDuration", 215_000)]
     assert all(c["componentId"] == "AudioPlayerRoot" for c in cmds)
 
 
 def test_set_track_time_commands_unknown():
     cmds = tt.set_track_time_commands(None, None)
-    assert [(c["property"], c["value"]) for c in cmds] == [("trackDuration", 0)]
+    assert [(c["property"], c["value"]) for c in cmds] == [("queueEnd", 0), ("trackDuration", 0)]
 
 
 def test_offset_prefers_previous_track_end():
@@ -132,7 +132,7 @@ def test_commands_set_slider_when_paused():
     cmds = tt.set_track_time_commands(-34_760, 326_000, shown_ms=34_760)
     assert cmds[-1] == {"type": "SetValue", "componentId": "slider",
                         "property": "progressValue", "value": 34_760}
-    assert len(tt.set_track_time_commands(-34_760, 326_000)) == 2
+    assert len(tt.set_track_time_commands(-34_760, 326_000)) == 3
 
 
 def test_queue_end_only_on_the_last_track():
@@ -155,15 +155,10 @@ def test_queue_end_unknown_duration():
     assert tracker.queue_end_ms("s") is None
 
 
-def test_queue_end_commands():
-    refresh = {"type": "SendEvent", "arguments": ["MetadataRefresh"]}
-    assert tt.queue_end_commands(100_000, 500_000, refresh) is None
-    assert tt.queue_end_commands(None, 500_000, refresh) is None
-    assert tt.queue_end_commands(497_000, None, refresh) is None
-    commands = tt.queue_end_commands(497_000, 500_000, refresh)
-    assert commands[0] == {"type": "Idle", "delay": 2_000}
-    assert commands[1]["when"] == "${!videoPlaying}" and commands[1]["commands"] == [refresh]
-    assert commands[2]["when"] == "${videoPlaying}"
-    assert commands[2]["commands"][-1] == {"type": "SendEvent", "arguments": ["QueueEnded"]}
-    # past the end (late refresh): stop at once
-    assert tt.queue_end_commands(501_000, 500_000, refresh)[0]["delay"] == 0
+
+def test_set_track_time_commands_queue_end():
+    commands = tt.set_track_time_commands(0, 300_000, queue_end_ms=290_000)
+    assert {"type": "SetValue", "componentId": "AudioPlayerRoot",
+            "property": "queueEnd", "value": 290_000} in commands
+    # not on the last track: cleared, so a page that was on it doesn't stop
+    assert tt.set_track_time_commands(0, 300_000)[0]["value"] == 0
