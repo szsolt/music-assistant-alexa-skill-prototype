@@ -19,6 +19,10 @@ from collections import OrderedDict
 # Sessions remembered for change detection; old ones fall out.
 _MAX_SESSIONS = 32
 
+# A new page whose stream MA started further into the track than this
+# started mid-track (MA's own resume); below it, it's startup delay.
+_MID_TRACK_START_MS = 15_000
+
 
 def track_key(info):
     """What identifies the playing track in the skill's metadata (data.info)."""
@@ -68,6 +72,9 @@ def page_start_offset_ms(position_ms, paused, paused_at_ms, elapsed_ms, stream_s
       else MA's elapsed time.
     - Opened by a resume: MA's new stream starts stream_start_ms into the
       track, so the video's 0 is that point of the track.
+    - Opened by MA resuming on its own (play in MA after the page closed):
+      MA's elapsed time is well ahead of the video, so the stream started
+      that far into the track.
     - Otherwise the stream starts with the track: 0.
     """
     if paused:
@@ -75,6 +82,8 @@ def page_start_offset_ms(position_ms, paused, paused_at_ms, elapsed_ms, stream_s
         return (position_ms or 0) - (stopped_at or 0)
     if stream_start_ms is not None:
         return -stream_start_ms
+    if elapsed_ms is not None and elapsed_ms - (position_ms or 0) > _MID_TRACK_START_MS:
+        return (position_ms or 0) - elapsed_ms
     return 0
 
 

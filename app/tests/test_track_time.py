@@ -101,6 +101,9 @@ def test_page_start_offset():
     assert tt.page_start_offset_ms(300, False, None, 4_000, None) == 0
     # reopened by our resume at 61 s: video 0 is 61 s into the track
     assert tt.page_start_offset_ms(300, False, None, 4_000, 61_000) == -61_000
+    # reopened by MA's own resume at 2:34: the stream starts mid-track
+    assert tt.page_start_offset_ms(1_000, False, None, 154_000, None) == -153_000
+    assert tt.page_start_offset_ms(None, False, None, 154_000, None) == -154_000
     # reopened paused after a screen pause at 61 s
     assert tt.page_start_offset_ms(0, True, 61_000, 75_000, None) == -61_000
     # reopened paused by a pause from MA: MA's elapsed time
