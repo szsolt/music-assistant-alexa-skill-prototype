@@ -113,3 +113,10 @@ def test_resume_position():
     assert tt.resume_position_s(None, None, 229) == 0
     assert tt.resume_position_s(500_000, 75.0, 229) == 228
     assert tt.resume_position_s(61_000, 75.0, None) == 61
+
+
+def test_commands_set_slider_when_paused():
+    cmds = tt.set_track_time_commands(-34_760, 326_000, shown_ms=34_760)
+    assert cmds[-1] == {"type": "SetValue", "componentId": "slider",
+                        "property": "progressValue", "value": 34_760}
+    assert len(tt.set_track_time_commands(-34_760, 326_000)) == 2

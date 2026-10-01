@@ -136,11 +136,13 @@ class TrackChangeTracker:
                 entry["offset"], entry["duration"] = offset_ms, duration_ms
 
 
-def set_track_time_commands(offset_ms, duration_ms):
+def set_track_time_commands(offset_ms, duration_ms, shown_ms=None):
     """APL SetValue commands for the page's trackOffset and trackDuration.
 
-    offset_ms None leaves the offset as it is; duration_ms None or 0 hides
-    the time display (unknown length, e.g. radio).
+    offset_ms None leaves the offset as it is; duration_ms None or 0 shows
+    no length (unknown, e.g. radio). shown_ms sets the slider's position
+    directly, for a paused page: the slider only follows the video's time
+    updates, and a paused video sends none.
     """
     commands = []
     if offset_ms is not None:
@@ -148,4 +150,7 @@ def set_track_time_commands(offset_ms, duration_ms):
                          "property": "trackOffset", "value": int(offset_ms)})
     commands.append({"type": "SetValue", "componentId": "AudioPlayerRoot",
                      "property": "trackDuration", "value": int(duration_ms or 0)})
+    if shown_ms is not None:
+        commands.append({"type": "SetValue", "componentId": "slider",
+                         "property": "progressValue", "value": max(int(shown_ms), 0)})
     return commands

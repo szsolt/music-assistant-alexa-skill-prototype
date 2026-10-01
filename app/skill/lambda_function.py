@@ -680,7 +680,8 @@ def _track_time_commands(handler_input, arguments):
     _track_changes.record(session_id, offset, duration_ms)
     logger.info("Track time for %s: duration=%s ms elapsed=%s ms paused=%s offset=%s ms",
                 player_id, duration_ms, elapsed_ms, paused, offset)
-    return track_time.set_track_time_commands(offset, duration_ms)
+    shown = (position_ms or 0) - offset if paused and offset is not None else None
+    return track_time.set_track_time_commands(offset, duration_ms, shown)
 
 
 class APLUserEventHandler(AbstractRequestHandler):
