@@ -82,10 +82,13 @@ def register_routes(bp):
             'artist': data.get('artist'),
             'album': data.get('album'),
             'imageUrl': image_url,
+            'playerId': data.get('playerId'),
             'version': shared_store._version,
             'timestamp': time.time()
         }
         page_live = _offer_to_open_page(data, 'stream', stream_url)
+        if not page_live:
+            device_mapping.wait_for_pairing(data.get('playerId'))
         return jsonify({'status': 'ok', 'version': shared_store._version, 'pageLive': page_live})
 
     @bp.route('/control', methods=['POST'])

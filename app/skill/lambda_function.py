@@ -185,6 +185,13 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
         logger.info("In LaunchRequestOrPlayAudioHandler")
 
         _ = handler_input.attributes_manager.request_attributes["_"]
+        device_id = _device_id_from(handler_input)
+        device_mapping.pair_if_waiting(device_id)
+        import shared_store
+        if device_mapping.is_another_echos_stream(device_id, (shared_store._store or {}).get('playerId')):
+            handler_input.response_builder.speak(
+                _(data.UNPAIRED_ECHO_MSG)).set_should_end_session(True)
+            return handler_input.response_builder.response
         # "Alexa, open music assistant": MA sends a new stream at its own
         # position, paused or playing. Replaying the stored URL makes MA
         # restart that flow where it first started it, while MA's clock (and

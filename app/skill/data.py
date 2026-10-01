@@ -27,6 +27,7 @@ NOT_POSSIBLE_MSG = _("This is radio, you can not do that.  You can ask me to sto
 STOP_MSG = _("")
 DEVICE_NOT_SUPPORTED = _("Sorry, this skill is not supported on this device")
 DEVICE_NOT_MAPPED_MSG = _("This device is not paired with a Music Assistant player yet. Please configure it on the status page.")
+UNPAIRED_ECHO_MSG = _("This Echo isn't linked to a Music Assistant player yet. Start music on it from Music Assistant once.")
 MA_COMMAND_FAILED_MSG = _("Sorry, I could not reach Music Assistant.")
 
 info = {
