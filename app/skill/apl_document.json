@@ -170,6 +170,11 @@
               "value": 0
             },
             {
+              "name": "videoPlaying",
+              "type": "boolean",
+              "value": false
+            },
+            {
               "name": "trackOffset",
               "type": "number",
               "value": 0
@@ -349,6 +354,20 @@
                           "property": "progressValue",
                           "value": "${videoProgressValue - trackOffset}"
                         }
+                      ],
+                      "onPlay": [
+                        {
+                          "type": "SetValue",
+                          "property": "videoPlaying",
+                          "value": true
+                        }
+                      ],
+                      "onPause": [
+                        {
+                          "type": "SetValue",
+                          "property": "videoPlaying",
+                          "value": false
+                        }
                       ]
                     },
                     {
@@ -427,14 +446,71 @@
                                   }
                                 },
                                 {
-                                  "type": "AlexaTransportControls",
-                                  "mediaComponentId": "videoPlayer",
-                                  "playPauseToggleButtonId": "playPauseToggleButtonId",
-                                  "primaryControlSize": "@primaryControlSize",
-                                  "secondaryControls": "none",
-                                  "secondaryControlSize": "@secondaryControlSize",
-                                  "autoplay": true,
-                                  "theme": "${viewport.theme}"
+                                  "type": "TouchWrapper",
+                                  "id": "playPauseButton",
+                                  "accessibilityLabel": "${videoPlaying ? 'Pause' : 'Play'}",
+                                  "width": "@primaryControlSize",
+                                  "height": "@primaryControlSize",
+                                  "description": "Pause stops the page at once and tells MA; play goes through MA, which sends a stream from the paused position.",
+                                  "onPress": [
+                                    {
+                                      "type": "Sequential",
+                                      "when": "${videoPlaying}",
+                                      "commands": [
+                                        {
+                                          "type": "ControlMedia",
+                                          "componentId": "videoPlayer",
+                                          "command": "pause"
+                                        },
+                                        {
+                                          "type": "SendEvent",
+                                          "arguments": [
+                                            "Pause",
+                                            "${videoProgressValue - trackOffset}"
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "Sequential",
+                                      "when": "${!videoPlaying}",
+                                      "commands": [
+                                        {
+                                          "type": "SetValue",
+                                          "componentId": "Busy_Overlay",
+                                          "property": "display",
+                                          "value": "normal"
+                                        },
+                                        {
+                                          "type": "AnimateItem",
+                                          "componentId": "Busy_Overlay",
+                                          "duration": 200,
+                                          "value": [
+                                            {
+                                              "property": "opacity",
+                                              "from": 0,
+                                              "to": 1
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "type": "SendEvent",
+                                          "arguments": [
+                                            "Play",
+                                            "${videoProgressValue - trackOffset}"
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "item": {
+                                    "type": "VectorGraphic",
+                                    "source": "${videoPlaying ? 'pauseIcon' : 'playIcon'}",
+                                    "color": "@colorText",
+                                    "width": "100%",
+                                    "height": "100%",
+                                    "scale": "best-fit"
+                                  }
                                 },
                                 {
                                   "type": "TouchWrapper",
@@ -604,6 +680,46 @@
           "type": "path",
           "fill": "${color}",
           "pathData": "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"
+        }
+      ]
+    },
+    "playIcon": {
+      "type": "AVG",
+      "version": "1.2",
+      "width": 24,
+      "height": 24,
+      "parameters": [
+        {
+          "name": "color",
+          "type": "color",
+          "default": "white"
+        }
+      ],
+      "items": [
+        {
+          "type": "path",
+          "fill": "${color}",
+          "pathData": "M8 5v14l11-7z"
+        }
+      ]
+    },
+    "pauseIcon": {
+      "type": "AVG",
+      "version": "1.2",
+      "width": 24,
+      "height": 24,
+      "parameters": [
+        {
+          "name": "color",
+          "type": "color",
+          "default": "white"
+        }
+      ],
+      "items": [
+        {
+          "type": "path",
+          "fill": "${color}",
+          "pathData": "M6 19h4V5H6v14zm8-14v14h4V5h-4z"
         }
       ]
     }

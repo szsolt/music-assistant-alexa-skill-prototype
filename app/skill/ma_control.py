@@ -27,9 +27,11 @@ from music_assistant_client.exceptions import (
     ConnectionFailed,
     InvalidServerVersion,
 )
+from music_assistant_models.enums import PlaybackState
 from music_assistant_models.errors import MusicAssistantError
 
 from env_secrets import get_env_secret
+from . import track_time
 
 logger = logging.getLogger(__name__)
 
@@ -142,11 +144,12 @@ async def _get_track_time(server_url, token, player_id):
                 return None
             duration = queue.current_item.duration
             return (int(duration * 1000) if duration else None,
-                    int(queue.corrected_elapsed_time * 1000))
+                    int(queue.corrected_elapsed_time * 1000),
+                    queue.state == PlaybackState.PAUSED)
 
 
 def get_current_track_time(player_id):
-    """(duration_ms, elapsed_ms) of the track MA is playing on player_id, or None.
+    """(duration_ms, elapsed_ms, paused) of MA's current track on player_id, or None.
 
     duration_ms is None when MA doesn't know the length (e.g. radio).
     Called once per track change from the APL refresh, not per refresh.
@@ -164,4 +167,42 @@ def get_current_track_time(player_id):
         logger.warning("Music Assistant could not return the queue of player %s: %s", player_id, e)
     except Exception:
         logger.exception("Unexpected error reading track time of MA player %s", player_id)
+    return None
+
+
+async def _resume_at(server_url, token, player_id, position_ms):
+    async with aiohttp.ClientSession() as session:
+        async with MusicAssistantClient(server_url, session, token=token) as client:
+            queue = await client.player_queues.get_active_queue(player_id)
+            if queue is None or queue.current_item is None:
+                raise ValueError(f"No active queue/current track for player {player_id}")
+            position = track_time.resume_position_s(position_ms, queue.elapsed_time,
+                                                    queue.current_item.duration)
+            await client.player_queues.seek(queue.queue_id, position)
+            return position * 1000
+
+
+def resume_at(player_id, position_ms=None):
+    """Resume MA's current track at position_ms (default: where MA paused).
+
+    Returns the position used, in ms, or None on failure.
+
+    Not players.play(): for this provider that speaks AMAZON.ResumeIntent
+    back into the Echo, which reopens the old flow URL at the start of the
+    track. A queue seek makes MA build a new stream from the position and
+    push it like any track change, with no echoed intent.
+    """
+    server_url = get_env_secret("MA_API_URL")
+    token = get_env_secret("MA_API_TOKEN")
+    if not server_url:
+        logger.error("MA_API_URL is not set; cannot resume MA player %s", player_id)
+        return None
+    try:
+        return asyncio.run(_resume_at(server_url, token, player_id, position_ms))
+    except (CannotConnect, ConnectionFailed, InvalidServerVersion) as e:
+        logger.error("Could not connect to Music Assistant at %s: %s", server_url, e)
+    except MusicAssistantError as e:
+        logger.error("Music Assistant rejected resume for player %s: %s", player_id, e)
+    except Exception:
+        logger.exception("Unexpected error resuming MA player %s", player_id)
     return None

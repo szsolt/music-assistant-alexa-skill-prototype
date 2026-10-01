@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import time
 import gettext
 import os
 from ask_sdk.standard import StandardSkillBuilder
@@ -379,7 +380,11 @@ class ResumeIntentHandler(AbstractRequestHandler):
         request = handler_input.request_envelope.request
         _ = handler_input.attributes_manager.request_attributes["_"]
 
-        _sync_to_ma_unless_echo(handler_input, "resume")
+        # Voice "Alexa, resume", or play in MA's UI (which MA's provider
+        # speaks as this intent): MA builds a new stream from the paused
+        # position and relaunches us; the old URL would start the track over.
+        if _resume_through_ma(handler_input) == "ok":
+            return handler_input.response_builder.set_should_end_session(True).response
 
         url, _audio = _get_stream_url(request)
         if not url:
@@ -593,13 +598,46 @@ class ExceptionEncounteredHandler(AbstractRequestHandler):
 # ########## APL INTERFACE HANDLERS #################################
 # This section contains handlers related to APL interface
 
-_APL_EVENTS = ("MetadataRefresh", "Next", "Previous")
+_APL_EVENTS = ("MetadataRefresh", "Next", "Previous", "Pause", "Play")
 _UNDO_BUTTON_PRESS = [
     {"type": "ControlMedia", "componentId": "videoPlayer", "command": "play"},
     {"type": "SetValue", "componentId": "Busy_Overlay", "property": "opacity", "value": 0},
     {"type": "SetValue", "componentId": "Busy_Overlay", "property": "display", "value": "none"},
 ]
 _track_changes = track_time.TrackChangeTracker()
+
+# Per Echo: where the page was paused (ms into the track), and where the
+# stream of our last resume starts (ms into the track, valid until).
+_STREAM_START_TTL_SECONDS = 60
+_paused_at = {}
+_stream_start = {}
+
+
+def _take_stream_start(device_id):
+    start, valid_until = _stream_start.pop(device_id, (None, 0))
+    return start if valid_until >= time.time() else None
+
+
+def _resume_through_ma(handler_input, position_ms=None):
+    """Resume MA at position_ms, else where the page or MA paused.
+
+    Returns "ok", "unmapped" or "failed". MA pushes a new stream from that
+    position and relaunches the skill, as for next/previous.
+    """
+    device_id = _device_id_from(handler_input)
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        logger.info("No MA player mapped for device_id=%s", (device_id or '')[-8:])
+        return "unmapped"
+    if position_ms is None:
+        position_ms = _paused_at.get(device_id)
+    start = ma_control.resume_at(player_id, position_ms)
+    if start is None:
+        return "failed"
+    _paused_at.pop(device_id, None)
+    _stream_start[device_id] = (start, time.time() + _STREAM_START_TTL_SECONDS)
+    logger.info("Resuming %s at %s ms", player_id, start)
+    return "ok"
 
 
 def _apl_event_arguments(handler_input):
@@ -627,13 +665,21 @@ def _track_time_commands(handler_input, arguments):
     player_id = device_mapping.get_player_for_device(_device_id_from(handler_input))
     if not player_id:
         return []
+    device_id = _device_id_from(handler_input)
     result = ma_control.get_current_track_time(player_id)
-    duration_ms, elapsed_ms = result if result else (None, None)
-    offset = track_time.choose_offset_ms(_track_changes.previous_end(session_id),
-                                         track_time.video_position_ms(arguments), elapsed_ms)
+    duration_ms, elapsed_ms, paused = result if result else (None, None, False)
+    position_ms = track_time.video_position_ms(arguments)
+    previous_end = _track_changes.previous_end(session_id)
+    if previous_end == 0:   # a new page
+        offset = track_time.page_start_offset_ms(position_ms, paused, _paused_at.get(device_id),
+                                                 elapsed_ms, _take_stream_start(device_id))
+        if not paused:
+            _paused_at.pop(device_id, None)
+    else:
+        offset = track_time.choose_offset_ms(previous_end, position_ms, elapsed_ms)
     _track_changes.record(session_id, offset, duration_ms)
-    logger.info("Track time for %s: duration=%s ms elapsed=%s ms offset=%s ms",
-                player_id, duration_ms, elapsed_ms, offset)
+    logger.info("Track time for %s: duration=%s ms elapsed=%s ms paused=%s offset=%s ms",
+                player_id, duration_ms, elapsed_ms, paused, offset)
     return track_time.set_track_time_commands(offset, duration_ms)
 
 
@@ -656,6 +702,24 @@ class APLUserEventHandler(AbstractRequestHandler):
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
         arguments = _apl_event_arguments(handler_input)
+        if arguments[0] == "Pause":
+            # The page has paused itself; remember where, and pause MA too.
+            # MA's provider then pauses the Echo, which reopens the page paused.
+            position_ms = track_time.video_position_ms(arguments, index=1)
+            logger.info("APL pause button at %s ms", position_ms)
+            if position_ms is not None:
+                _paused_at[_device_id_from(handler_input)] = position_ms
+            _sync_to_ma_unless_echo(handler_input, "pause")
+            self._schedule_refresh(handler_input)
+            return handler_input.response_builder.set_should_end_session(None).response
+        if arguments[0] == "Play":
+            position_ms = track_time.video_position_ms(arguments, index=1)
+            logger.info("APL play button at %s ms", position_ms)
+            if _resume_through_ma(handler_input, position_ms) != "ok":
+                # MA won't send a stream: play the page's own one.
+                util.execute_apl_commands(handler_input.response_builder, _UNDO_BUTTON_PRESS)
+            self._schedule_refresh(handler_input)
+            return handler_input.response_builder.set_should_end_session(None).response
         if arguments[0] in ("Next", "Previous"):
             command = arguments[0].lower()
             logger.info("APL %s button", command)

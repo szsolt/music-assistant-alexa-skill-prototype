@@ -65,10 +65,11 @@ def add_apl(response_builder, start_paused=False):
     # Set the dynamic autoplay value based on start_paused
     autoplay = not start_paused
 
-    # Update autoplay in the Video component and AlexaTransportControls,
-    # found by type: their place in the layout changes with the page design.
+    # Update autoplay in the Video component, found by type: its place in
+    # the layout changes with the page design. The play/pause button
+    # follows the video's own play and pause events.
     for component in _components(apl_document["layouts"]["AudioPlayer"]):
-        if component.get("type") in ("Video", "AlexaTransportControls"):
+        if component.get("type") == "Video":
             component["autoplay"] = autoplay
 
     # Update mainTemplate with metadata values

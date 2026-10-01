@@ -89,3 +89,27 @@ def test_tracker_unknown_duration_breaks_the_chain():
     t.changed("s1", ("u", "Song", ""))
     assert t.previous_end("s1") is None
     assert t.previous_end("nope") is None
+
+
+def test_event_position_at_index():
+    assert tt.video_position_ms(["Pause", 61000.4], index=1) == 61000
+    assert tt.video_position_ms(["Play"], index=1) is None
+
+
+def test_page_start_offset():
+    # normal new page: the stream starts with the track
+    assert tt.page_start_offset_ms(300, False, None, 4_000, None) == 0
+    # reopened by our resume at 61 s: video 0 is 61 s into the track
+    assert tt.page_start_offset_ms(300, False, None, 4_000, 61_000) == -61_000
+    # reopened paused after a screen pause at 61 s
+    assert tt.page_start_offset_ms(0, True, 61_000, 75_000, None) == -61_000
+    # reopened paused by a pause from MA: MA's elapsed time
+    assert tt.page_start_offset_ms(None, True, None, 75_000, None) == -75_000
+
+
+def test_resume_position():
+    assert tt.resume_position_s(61_900, 75.0, 229) == 61
+    assert tt.resume_position_s(None, 75.6, 229) == 75
+    assert tt.resume_position_s(None, None, 229) == 0
+    assert tt.resume_position_s(500_000, 75.0, 229) == 228
+    assert tt.resume_position_s(61_000, 75.0, None) == 61

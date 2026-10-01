@@ -27,16 +27,17 @@ def track_key(info):
             info.get('secondaryText') or '')
 
 
-def video_position_ms(arguments):
-    """The page's video position from a MetadataRefresh event, or None.
+def video_position_ms(arguments, index=2):
+    """A position in ms from an APL event's arguments, or None.
 
-    arguments: ["MetadataRefresh", refreshTick, videoProgressValue]; the
-    third one is missing when the event came from an older page.
+    MetadataRefresh: ["MetadataRefresh", refreshTick, videoProgressValue];
+    the third one is missing when the event came from an older page.
+    Pause/Play: [name, shown track position], index 1.
     """
-    if not arguments or len(arguments) < 3:
+    if not arguments or len(arguments) <= index:
         return None
     try:
-        return max(int(float(arguments[2])), 0)
+        return max(int(float(arguments[index])), 0)
     except (TypeError, ValueError):
         return None
 
@@ -57,6 +58,36 @@ def choose_offset_ms(previous_end_ms, position_ms, elapsed_ms):
     if position_ms is not None and elapsed_ms is not None:
         return track_offset_ms(position_ms, elapsed_ms)
     return None
+
+
+def page_start_offset_ms(position_ms, paused, paused_at_ms, elapsed_ms, stream_start_ms):
+    """trackOffset for the first track of a new page.
+
+    - Opened paused (a pause from MA reopens the page at the stream's start):
+      show where playback stopped, the page's own pause position if known,
+      else MA's elapsed time.
+    - Opened by a resume: MA's new stream starts stream_start_ms into the
+      track, so the video's 0 is that point of the track.
+    - Otherwise the stream starts with the track: 0.
+    """
+    if paused:
+        stopped_at = paused_at_ms if paused_at_ms is not None else elapsed_ms
+        return (position_ms or 0) - (stopped_at or 0)
+    if stream_start_ms is not None:
+        return -stream_start_ms
+    return 0
+
+
+def resume_position_s(requested_ms, elapsed_s, duration_s):
+    """Where to resume, in whole seconds inside the track.
+
+    The page's pause position if known, else MA's elapsed time; kept off
+    the very end, where MA refuses a seek.
+    """
+    position = requested_ms / 1000 if requested_ms is not None else (elapsed_s or 0)
+    if duration_s:
+        position = min(position, duration_s - 1)
+    return max(int(position), 0)
 
 
 class TrackChangeTracker:
