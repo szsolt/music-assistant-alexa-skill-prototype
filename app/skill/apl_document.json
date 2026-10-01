@@ -363,15 +363,6 @@
                           "type": "SetValue",
                           "property": "videoPlaying",
                           "value": true
-                        },
-                        {
-                          "type": "SendEvent",
-                          "description": "Restarts the refresh loop from the skill's answer: the Show sometimes never runs the page's onMount loop.",
-                          "arguments": [
-                            "MetadataRefresh",
-                            "${refreshTick}",
-                            "${videoProgressValue}"
-                          ]
                         }
                       ],
                       "onPause": [
