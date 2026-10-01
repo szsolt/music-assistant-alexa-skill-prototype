@@ -13,7 +13,7 @@ from ask_sdk_core.utils import is_request_type, is_intent_name
 from ask_sdk_core.handler_input import HandlerInput
 from ask_sdk_model import Response
 
-from . import data, util, device_mapping, live_page, ma_control, track_time
+from . import data, util, device_mapping, live_page, ma_control, track_time, bell
 
 sb = StandardSkillBuilder()
 # sb = StandardSkillBuilder(
@@ -696,7 +696,7 @@ class ExceptionEncounteredHandler(AbstractRequestHandler):
 # ########## APL INTERFACE HANDLERS #################################
 # This section contains handlers related to APL interface
 
-_APL_EVENTS = ("MetadataRefresh", "Next", "Previous", "Pause", "Play", "QueueEnded")
+_APL_EVENTS = ("MetadataRefresh", "Next", "Previous", "Pause", "Play", "QueueEnded", "BellFail")
 _UNDO_BUTTON_PRESS = [
     {"type": "ControlMedia", "componentId": "videoPlayer", "command": "play"},
     {"type": "SetValue", "componentId": "Busy_Overlay", "property": "opacity", "value": 0},
@@ -855,6 +855,12 @@ class APLUserEventHandler(AbstractRequestHandler):
             logger.info("Queue ended on the page")
             _sync_to_ma_unless_echo(handler_input, "stop")
             return handler_input.response_builder.set_should_end_session(None).response
+        if arguments[0] == "BellFail":
+            # Doorbell test (see bell.py). If onFail ran in normal mode, it
+            # stopped the refresh chain: start it again.
+            bell.failed(arguments)
+            self._schedule_refresh(handler_input)
+            return handler_input.response_builder.set_should_end_session(None).response
         if arguments[0] in ("Next", "Previous"):
             command = arguments[0].lower()
             logger.info("APL %s button", command)
@@ -867,6 +873,7 @@ class APLUserEventHandler(AbstractRequestHandler):
                 self._schedule_refresh(handler_input)
             return handler_input.response_builder.set_should_end_session(None).response
 
+        bell.page_counts(arguments)
         # One ExecuteCommands directive for the whole answer: each new one
         # cancels the commands still running from the one before (a loading
         # PlayMedia, and the commands after it).

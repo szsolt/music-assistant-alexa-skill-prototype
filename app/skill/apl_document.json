@@ -154,6 +154,12 @@
           "description": "Determinate for full control of the slider with transport control. Indeterminate is an ambient progress bar with animation.",
           "type": "string",
           "default": "determinate"
+        },
+        {
+          "name": "bellUrl",
+          "description": "Doorbell test: base URL of the skill's bell image on the LAN; empty turns the bell off.",
+          "type": "string",
+          "default": ""
         }
       ],
       "item": [
@@ -201,6 +207,21 @@
               "name": "queueEnded",
               "type": "boolean",
               "value": false
+            },
+            {
+              "name": "bellTick",
+              "type": "number",
+              "value": 0
+            },
+            {
+              "name": "bellLoads",
+              "type": "number",
+              "value": 0
+            },
+            {
+              "name": "bellFails",
+              "type": "number",
+              "value": 0
             }
           ],
           "handleTick": [
@@ -225,6 +246,18 @@
                   "command": "pause"
                 }
               ]
+            },
+            {
+              "description": "Doorbell test: a new bell URL every second, so the hidden bell image loads again.",
+              "minimumDelay": 1000,
+              "when": "${bellUrl != ''}",
+              "commands": [
+                {
+                  "type": "SetValue",
+                  "property": "bellTick",
+                  "value": "${bellTick + 1}"
+                }
+              ]
             }
           ],
           "onMount": [
@@ -246,7 +279,9 @@
                   "arguments": [
                     "MetadataRefresh",
                     "${refreshTick}",
-                    "${videoProgressValue}"
+                    "${videoProgressValue}",
+                    "${bellLoads}",
+                    "${bellFails}"
                   ]
                 }
               ]
@@ -414,6 +449,42 @@
                           "type": "SetValue",
                           "property": "queueEnded",
                           "value": false
+                        }
+                      ]
+                    },
+                    {
+                      "description": "Doorbell test: a hidden image the Show reloads from the skill over the LAN. An error answer means news (see the skill's bell.py).",
+                      "type": "Image",
+                      "id": "bell",
+                      "when": "${bellUrl != ''}",
+                      "width": 1,
+                      "height": 1,
+                      "position": "absolute",
+                      "opacity": 0,
+                      "source": "${bellUrl}${bellTick}.png",
+                      "onLoad": [
+                        {
+                          "type": "SetValue",
+                          "componentId": "AudioPlayerRoot",
+                          "property": "bellLoads",
+                          "value": "${bellLoads + 1}"
+                        }
+                      ],
+                      "onFail": [
+                        {
+                          "type": "SetValue",
+                          "componentId": "AudioPlayerRoot",
+                          "property": "bellFails",
+                          "value": "${bellFails + 1}"
+                        },
+                        {
+                          "type": "SendEvent",
+                          "arguments": [
+                            "BellFail",
+                            "${event.errorCode}",
+                            "${event.error}",
+                            "${bellTick}"
+                          ]
                         }
                       ]
                     },
@@ -680,7 +751,8 @@
         "headerSubtitle": "${headerSubtitle}",
         "primaryText": "${primaryText}",
         "secondaryText": "${secondaryText}",
-        "sliderType": "determinate"
+        "sliderType": "determinate",
+        "bellUrl": "${bellUrl}"
       }
     ]
   },

@@ -3,6 +3,7 @@ import sys
 from flask import Flask, request, jsonify, Response, g
 from flask_ask_sdk.skill_adapter import SkillAdapter
 from skill.lambda_function import sb  # sb is the SkillBuilder from skill/lambda_function.py
+from skill import bell
 import json
 import music_assistant_api as ma_api
 import alexa_api as alexa_api
@@ -158,6 +159,9 @@ def _check_app_basic_auth():
     # Allow the Alexa skill POST endpoint to be called without app-level auth
     if request.path == '/' and request.method == 'POST':
         return None
+    # The player page's doorbell image is loaded by the Show, which has no credentials
+    if request.path.startswith('/bell/') and request.method == 'GET':
+        return None
     # Read credentials from secrets (APP_USERNAME/APP_PASSWORD)
     app_user = get_env_secret('APP_USERNAME')
     app_pass = get_env_secret('APP_PASSWORD')
@@ -284,6 +288,16 @@ def _read_master_loop(master_fd, prefix=None):
 @app.route("/", methods=["POST"])
 def invoke_skill():
     return skill_adapter.dispatch_request()
+
+
+@app.route('/bell/<int:tick>.png', methods=['GET'])
+def bell_image(tick):
+    # Doorbell test for the player page (see skill/bell.py)
+    status, _ = bell.rang(tick)
+    resp = Response(bell.PNG if status == 200 else b'', status, mimetype='image/png')
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
 
 # Expose OpenAPI spec and Swagger UI from the main app so docs are available
 # at `/openapi.json` and `/docs` (keeps documentation separate from the API

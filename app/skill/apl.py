@@ -83,7 +83,9 @@ def add_apl(response_builder, start_paused=False):
             "headerTitle": metadata.get("headerTitle", ""),
             "headerSubtitle": metadata.get("headerSubtitle", ""),
             "primaryText": metadata.get("primaryText", ""),
-            "secondaryText": metadata.get("secondaryText", "")
+            "secondaryText": metadata.get("secondaryText", ""),
+            # Doorbell test (see bell.py): where the Show finds the skill on the LAN
+            "bellUrl": os.environ.get("APL_BELL_URL", "").strip(),
         })
     except (KeyError, IndexError):
         logging.warning("Could not update mainTemplate in APL document")

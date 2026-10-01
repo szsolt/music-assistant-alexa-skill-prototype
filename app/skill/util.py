@@ -414,7 +414,9 @@ def apl_refresh_commands(delay_ms=1000):
             "arguments": [
                 "MetadataRefresh",
                 "${refreshTick}",
-                "${videoProgressValue}"
+                "${videoProgressValue}",
+                "${bellLoads}",
+                "${bellFails}"
             ]
         }
     ]
