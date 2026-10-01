@@ -31,13 +31,20 @@ def _rewrite_url(url: str) -> str:
         return url
 
 
-def _resend_spoken(player_id):
-    """For a hand-off the page missed: have MA send the stream the spoken way."""
+def _fall_back_to_speech(player_id):
+    """For a hand-off the page missed: have MA do it the spoken way."""
     def missed(device_id, command):
+        logger.warning("Open page on %s missed the %s hand-off: asking MA to do it the spoken way",
+                       player_id, command)
         if command in ("stream", "resume"):
-            logger.warning("Open page on %s missed the %s hand-off: asking MA to resend", player_id, command)
             if ma_control.resume_at(player_id) is None:
                 logger.warning("MA did not resend the stream for %s", player_id)
+        elif command == "pause":
+            # MA is paused already and the Echo still plays: MA pauses again,
+            # now speaking (the page counts as closed); its echo is ours.
+            ma_control.mark_ma_triggered(device_id, "pause")
+            if not ma_control.send_player_command(player_id, "pause"):
+                logger.warning("MA did not pause %s again", player_id)
     return missed
 
 
@@ -51,7 +58,7 @@ def _offer_to_open_page(data, command, value=None):
     if not data.get('canSkipSpeech') or not player_id:
         return False
     for device_id in device_mapping.get_devices_for_player(player_id):
-        if live_page.offer(device_id, command, value, on_missed=_resend_spoken(player_id)):
+        if live_page.offer(device_id, command, value, on_missed=_fall_back_to_speech(player_id)):
             logger.info("Handing %s to the open page on %s", command, player_id)
             return True
     return False
