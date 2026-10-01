@@ -196,11 +196,16 @@
               "name": "queueEnd",
               "type": "number",
               "value": 0
+            },
+            {
+              "name": "queueEnded",
+              "type": "boolean",
+              "value": false
             }
           ],
           "handleTick": [
             {
-              "description": "At the end of MA's queue (video ms, set by the skill on its last track) pause, so the Show doesn't ask for the ended stream again, and tell the skill. Here, not in the skill's commands: those can't read this component's binds.",
+              "description": "At the end of MA's queue (video ms, set by the skill on its last track) pause, so the Show doesn't ask for the ended stream again; the video's onPause tells the skill. Here, not in the skill's commands: those can't read this component's binds. Tick handlers run in fast mode, which drops SendEvent.",
               "minimumDelay": 250,
               "when": "${queueEnd > 0 && videoPlaying && videoProgressValue >= queueEnd - 1000}",
               "commands": [
@@ -210,13 +215,14 @@
                   "value": 0
                 },
                 {
+                  "type": "SetValue",
+                  "property": "queueEnded",
+                  "value": true
+                },
+                {
                   "type": "ControlMedia",
                   "componentId": "videoPlayer",
                   "command": "pause"
-                },
-                {
-                  "type": "SendEvent",
-                  "arguments": ["QueueEnded"]
                 }
               ]
             }
@@ -397,6 +403,16 @@
                         {
                           "type": "SetValue",
                           "property": "videoPlaying",
+                          "value": false
+                        },
+                        {
+                          "type": "SendEvent",
+                          "when": "${queueEnded}",
+                          "arguments": ["QueueEnded"]
+                        },
+                        {
+                          "type": "SetValue",
+                          "property": "queueEnded",
                           "value": false
                         }
                       ]
