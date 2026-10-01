@@ -222,6 +222,11 @@
               "name": "bellFails",
               "type": "number",
               "value": 0
+            },
+            {
+              "name": "bellError",
+              "type": "string",
+              "value": ""
             }
           ],
           "handleTick": [
@@ -477,6 +482,12 @@
                           "value": "${bellFails + 1}"
                         },
                         {
+                          "type": "SetValue",
+                          "componentId": "AudioPlayerRoot",
+                          "property": "bellError",
+                          "value": "${bellTick}: ${event.errorCode} ${event.error}"
+                        },
+                        {
                           "type": "SendEvent",
                           "arguments": [
                             "BellFail",
@@ -496,7 +507,7 @@
                       "top": 0,
                       "left": 0,
                       "fontSize": "20dp",
-                      "text": "bell ${bellTick}: ${bellLoads} ok, ${bellFails} fail"
+                      "text": "bell ${bellTick}: ${bellLoads} ok, ${bellFails} fail, last fail ${bellError}"
                     },
                     {
                       "description": "Determinate Slider Container",
