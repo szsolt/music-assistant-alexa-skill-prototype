@@ -816,13 +816,17 @@ class APLUserEventHandler(AbstractRequestHandler):
         live_page.heard_from(_device_id_from(handler_input))
         arguments = _apl_event_arguments(handler_input)
         if arguments[0] == "Pause":
-            # The page has paused itself; remember where, and pause MA too.
-            # MA's provider then pauses the Echo, which reopens the page paused.
+            # Remember where, pause MA, and pause the page in this answer.
+            # MA hands its pause back to this page (or, unpatched, makes the
+            # Echo hear "pause", which reopens the page paused).
+            device_id = _device_id_from(handler_input)
             position_ms = track_time.video_position_ms(arguments, index=1)
             logger.info("APL pause button at %s ms", position_ms)
-            _remember(_paused_at, _device_id_from(handler_input), position_ms)
+            _remember(_paused_at, device_id, position_ms)
             _sync_to_ma_unless_echo(handler_input, "pause")
-            self._schedule_refresh(handler_input)
+            live_page.take(device_id, "pause")
+            self._schedule_refresh(handler_input, [
+                {"type": "ControlMedia", "componentId": "videoPlayer", "command": "pause"}])
             return handler_input.response_builder.set_should_end_session(None).response
         if arguments[0] == "Play":
             position_ms = track_time.video_position_ms(arguments, index=1)

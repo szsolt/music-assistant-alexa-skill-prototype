@@ -454,7 +454,7 @@
                                   "accessibilityLabel": "${videoPlaying ? 'Pause' : 'Play'}",
                                   "width": "@primaryControlSize",
                                   "height": "@primaryControlSize",
-                                  "description": "Pause stops the page at once and tells MA; play goes through MA, which sends a stream from the paused position. The play branch comes first: the pause branch flips videoPlaying, and a play branch after it would run too.",
+                                  "description": "Pause asks the skill, whose answer pauses the video and MA (a page that paused itself on the tap has stopped sending events); play goes through MA, which sends a stream from the paused position. The play branch comes first: a pause flips videoPlaying, and a play branch after it would run too.",
                                   "onPress": [
                                     {
                                       "type": "Sequential",
@@ -491,11 +491,6 @@
                                       "type": "Sequential",
                                       "when": "${videoPlaying}",
                                       "commands": [
-                                        {
-                                          "type": "ControlMedia",
-                                          "componentId": "videoPlayer",
-                                          "command": "pause"
-                                        },
                                         {
                                           "type": "SendEvent",
                                           "arguments": [

@@ -24,6 +24,14 @@ def test_offer_needs_open_page_and_is_taken_once():
     assert lp.take("d") is None
 
 
+def test_take_of_one_command_leaves_others():
+    lp.heard_from("d")
+    lp.offer("d", "stream", "u1")
+    assert lp.take("d", "pause") is None
+    assert lp.take("d", "stream") == ("stream", "u1")
+    lp.closed("d")
+
+
 def test_closed_drops_page_and_handoff():
     lp.heard_from("d")
     lp.offer("d", "pause")

@@ -85,10 +85,17 @@ def offer(device_id, command, value=None, on_missed=None):
     return True
 
 
-def take(device_id):
-    """(command, value) handed to the device's page, or None; once."""
+def take(device_id, command=None):
+    """(command, value) handed to the device's page, or None; once.
+
+    With command, only a hand-off of that command is taken.
+    """
     with _lock:
-        entry = _handoff.pop(device_id, None)
+        entry = _handoff.get(device_id)
+        if entry and command is not None and entry[0] != command:
+            entry = None
+        if entry:
+            del _handoff[device_id]
     if not entry:
         return None
     entry[2].cancel()
