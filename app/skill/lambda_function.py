@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import threading
 import time
 import gettext
 import os
@@ -162,6 +163,7 @@ class SkillEventHandler(AbstractRequestHandler):
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
         logger.info("In SkillEventHandler")
+        _page_heard_from(handler_input)
         # A response Alexa rejects (e.g. an invalid Play URL) only shows up here:
         # the Echo just says there was a problem with the skill's response.
         req = handler_input.request_envelope.request
@@ -224,7 +226,65 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
         # shows, or shows without ever sending a refresh.
         logger.info("Player page response built in %d ms (APL: %s)",
                     (time.monotonic() - started) * 1000, _supports_apl(handler_input))
+        if _supports_apl(handler_input):
+            _watch_page(_device_id_from(handler_input))
         return response
+
+
+# A working player page sends its first refresh 2-4 s after it opens. After
+# a few minutes of idle the Show's first page sometimes shows but neither
+# plays nor sends a single event, until it closes ~30 s later. MA sending
+# the stream again (as a skip in MA does) brings up a page that works.
+_PAGE_WATCHDOG_S = 10
+# At most one resend per this long per Echo, so a Show that keeps failing
+# doesn't loop.
+_PAGE_RESEND_PAUSE_S = 60
+_page_watch = {}        # device_id -> Timer
+_page_resent_at = {}    # device_id -> time.monotonic()
+_page_watch_lock = threading.Lock()
+
+
+def _watch_page(device_id):
+    """Have MA resend the stream if the page just sent sends no event in time."""
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        return
+
+    def check():
+        with _page_watch_lock:
+            if _page_watch.get(device_id) is not timer:
+                return
+            del _page_watch[device_id]
+            last = _page_resent_at.get(device_id)
+            if last is not None and time.monotonic() - last < _PAGE_RESEND_PAUSE_S:
+                logger.warning("Player page on %s sent no event in %d s; resent recently, leaving it",
+                               player_id, _PAGE_WATCHDOG_S)
+                return
+            _page_resent_at[device_id] = time.monotonic()
+        result = ma_control.get_current_track_time(player_id)
+        if not result or result[2]:
+            return   # MA has nothing to play, or is paused: a resend would play it
+        logger.warning("Player page on %s sent no event in %d s: asking MA to resend the stream",
+                       player_id, _PAGE_WATCHDOG_S)
+        if ma_control.resume_at(player_id) is None:
+            logger.warning("MA did not resend the stream for %s", player_id)
+
+    timer = threading.Timer(_PAGE_WATCHDOG_S, check)
+    timer.daemon = True
+    with _page_watch_lock:
+        old = _page_watch.pop(device_id, None)
+        _page_watch[device_id] = timer
+    if old:
+        old.cancel()
+    timer.start()
+
+
+def _page_heard_from(handler_input):
+    """The Echo's page sent an event or closed: no resend needed."""
+    with _page_watch_lock:
+        timer = _page_watch.pop(_device_id_from(handler_input), None)
+    if timer:
+        timer.cancel()
 
 
 class HelpIntentHandler(AbstractRequestHandler):
@@ -362,6 +422,7 @@ class CancelOrStopIntentHandler(AbstractRequestHandler):
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
         logger.info("In CancelOrStopIntentHandler")
+        _page_heard_from(handler_input)
         _ = handler_input.attributes_manager.request_attributes["_"]
         # The Show closes a paused page after ~30 s and then sends this Stop.
         # MA stays paused: play in MA then resumes through us at the paused
@@ -748,6 +809,7 @@ class APLUserEventHandler(AbstractRequestHandler):
 
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
+        _page_heard_from(handler_input)
         arguments = _apl_event_arguments(handler_input)
         if arguments[0] == "Pause":
             # The page has paused itself; remember where, and pause MA too.
