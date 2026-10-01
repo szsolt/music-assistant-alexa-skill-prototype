@@ -19,6 +19,13 @@ from collections import OrderedDict
 # Sessions remembered for change detection; old ones fall out.
 _MAX_SESSIONS = 32
 
+# The page's refreshes come ~2.5 s apart: one of them falls within this
+# of the queue's end, and plans the stop at the end.
+_QUEUE_END_WINDOW_MS = 4_000
+# Stop this much before the end: the Show asks for an ended stream again
+# at once, and MA answers that by restarting the old flow.
+_QUEUE_END_MARGIN_MS = 1_000
+
 # A new page whose stream MA started further into the track than this
 # started mid-track (MA's own resume); below it, it's startup delay.
 _MID_TRACK_START_MS = 15_000
@@ -136,7 +143,7 @@ class TrackChangeTracker:
             else:
                 previous_end = None
             self._seen[session_id] = {"key": key, "offset": None, "duration": None,
-                                      "previous_end": previous_end}
+                                      "last": False, "previous_end": previous_end}
             self._seen.move_to_end(session_id)
             while len(self._seen) > self._max:
                 self._seen.popitem(last=False)
@@ -153,12 +160,45 @@ class TrackChangeTracker:
         with self._lock:
             self._seen.pop(session_id, None)
 
-    def record(self, session_id, offset_ms, duration_ms):
-        """Remember where the current track lies, for the next change."""
+    def record(self, session_id, offset_ms, duration_ms, last=False):
+        """Remember where the current track lies, for the next change.
+
+        last: nothing follows it in MA's queue.
+        """
         with self._lock:
             entry = self._seen.get(session_id)
             if entry:
-                entry["offset"], entry["duration"] = offset_ms, duration_ms
+                entry["offset"], entry["duration"], entry["last"] = offset_ms, duration_ms, last
+
+    def queue_end_ms(self, session_id):
+        """Where MA's queue ends in this session's video (ms), or None if not on its last track."""
+        with self._lock:
+            entry = self._seen.get(session_id)
+            if not entry or not entry["last"] or entry["offset"] is None or not entry["duration"]:
+                return None
+            return entry["offset"] + entry["duration"]
+
+
+def queue_end_commands(position_ms, end_ms, refresh_event):
+    """APL commands that stop the page at the queue's end, or None if it's not near.
+
+    They wait out the rest of the last track, pause the video and send
+    QueueEnded. A page paused meanwhile sends refresh_event instead and is
+    left alone. They replace the refresh: the answer to either event goes on.
+    """
+    if end_ms is None or position_ms is None:
+        return None
+    remaining = end_ms - position_ms
+    if remaining > _QUEUE_END_WINDOW_MS:
+        return None
+    return [
+        {"type": "Idle", "delay": max(remaining - _QUEUE_END_MARGIN_MS, 0)},
+        {"type": "Sequential", "when": "${!videoPlaying}", "commands": [refresh_event]},
+        {"type": "Sequential", "when": "${videoPlaying}", "commands": [
+            {"type": "ControlMedia", "componentId": "videoPlayer", "command": "pause"},
+            {"type": "SendEvent", "arguments": ["QueueEnded"]},
+        ]},
+    ]
 
 
 def set_track_time_commands(offset_ms, duration_ms, shown_ms=None):

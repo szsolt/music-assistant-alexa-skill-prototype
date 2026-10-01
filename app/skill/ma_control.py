@@ -145,13 +145,15 @@ async def _get_track_time(server_url, token, player_id):
             duration = queue.current_item.duration
             return (int(duration * 1000) if duration else None,
                     int(queue.corrected_elapsed_time * 1000),
-                    queue.state == PlaybackState.PAUSED)
+                    queue.state == PlaybackState.PAUSED,
+                    queue.next_item is None)
 
 
 def get_current_track_time(player_id):
-    """(duration_ms, elapsed_ms, paused) of MA's current track on player_id, or None.
+    """(duration_ms, elapsed_ms, paused, last) of MA's current track on player_id, or None.
 
-    duration_ms is None when MA doesn't know the length (e.g. radio).
+    duration_ms is None when MA doesn't know the length (e.g. radio); last
+    is True when nothing follows it in the queue.
     Called once per track change from the APL refresh, not per refresh.
     """
     server_url = get_env_secret("MA_API_URL")

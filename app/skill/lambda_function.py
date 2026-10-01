@@ -686,7 +686,7 @@ class ExceptionEncounteredHandler(AbstractRequestHandler):
 # ########## APL INTERFACE HANDLERS #################################
 # This section contains handlers related to APL interface
 
-_APL_EVENTS = ("MetadataRefresh", "Next", "Previous", "Pause", "Play")
+_APL_EVENTS = ("MetadataRefresh", "Next", "Previous", "Pause", "Play", "QueueEnded")
 _UNDO_BUTTON_PRESS = [
     {"type": "ControlMedia", "componentId": "videoPlayer", "command": "play"},
     {"type": "SetValue", "componentId": "Busy_Overlay", "property": "opacity", "value": 0},
@@ -773,7 +773,7 @@ def _track_time_commands(handler_input, arguments):
         return []
     device_id = _device_id_from(handler_input)
     result = ma_control.get_current_track_time(player_id)
-    duration_ms, elapsed_ms, paused = result if result else (None, None, False)
+    duration_ms, elapsed_ms, paused, last = result if result else (None, None, False, False)
     position_ms = track_time.video_position_ms(arguments)
     previous_end = _track_changes.previous_end(session_id)
     if previous_end == 0:   # a new page
@@ -787,9 +787,9 @@ def _track_time_commands(handler_input, arguments):
             _ma_paused_at.pop(device_id, None)
     else:
         offset = track_time.choose_offset_ms(previous_end, position_ms, elapsed_ms)
-    _track_changes.record(session_id, offset, duration_ms)
-    logger.info("Track time for %s: duration=%s ms elapsed=%s ms paused=%s offset=%s ms",
-                player_id, duration_ms, elapsed_ms, paused, offset)
+    _track_changes.record(session_id, offset, duration_ms, last)
+    logger.info("Track time for %s: duration=%s ms elapsed=%s ms paused=%s offset=%s ms last=%s",
+                player_id, duration_ms, elapsed_ms, paused, offset, last)
     shown = (position_ms or 0) - offset if paused and offset is not None else None
     return track_time.set_track_time_commands(offset, duration_ms, shown)
 
@@ -836,6 +836,13 @@ class APLUserEventHandler(AbstractRequestHandler):
                 self._schedule_refresh(handler_input, _UNDO_BUTTON_PRESS)
             else:
                 self._schedule_refresh(handler_input)
+            return handler_input.response_builder.set_should_end_session(None).response
+        if arguments[0] == "QueueEnded":
+            # The page paused at the end of MA's last track. Stop MA, or it
+            # restarts the old flow when the Show asks for the stream again;
+            # MA's stop then closes the page.
+            logger.info("Queue ended on the page")
+            _sync_to_ma_unless_echo(handler_input, "stop")
             return handler_input.response_builder.set_should_end_session(None).response
         if arguments[0] in ("Next", "Previous"):
             command = arguments[0].lower()
@@ -891,6 +898,11 @@ class APLUserEventHandler(AbstractRequestHandler):
         # The media command runs next to the refresh timer: whether or not it
         # completes before the stream plays, the refreshes go on.
         refresh = util.apl_refresh_commands()
+        if not media:
+            refresh = track_time.queue_end_commands(
+                track_time.video_position_ms(arguments),
+                _track_changes.queue_end_ms(_session_id_from(handler_input)),
+                refresh[-1]) or refresh
         if media:
             refresh = [{"type": "Parallel",
                         "commands": media + [{"type": "Sequential", "commands": refresh}]}]

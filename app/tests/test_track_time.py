@@ -133,3 +133,37 @@ def test_commands_set_slider_when_paused():
     assert cmds[-1] == {"type": "SetValue", "componentId": "slider",
                         "property": "progressValue", "value": 34_760}
     assert len(tt.set_track_time_commands(-34_760, 326_000)) == 2
+
+
+def test_queue_end_only_on_the_last_track():
+    tracker = tt.TrackChangeTracker()
+    tracker.changed("s", ("u", "a", "x"))
+    tracker.record("s", 0, 200_000)
+    assert tracker.queue_end_ms("s") is None
+    tracker.changed("s", ("u", "b", "x"))
+    tracker.record("s", 200_000, 300_000, last=True)
+    assert tracker.queue_end_ms("s") == 500_000
+    tracker.changed("s", ("u", "c", "x"))   # the queue grew: no longer known
+    assert tracker.queue_end_ms("s") is None
+    assert tracker.queue_end_ms("other") is None
+
+
+def test_queue_end_unknown_duration():
+    tracker = tt.TrackChangeTracker()
+    tracker.changed("s", ("u", "radio", ""))
+    tracker.record("s", 0, None, last=True)
+    assert tracker.queue_end_ms("s") is None
+
+
+def test_queue_end_commands():
+    refresh = {"type": "SendEvent", "arguments": ["MetadataRefresh"]}
+    assert tt.queue_end_commands(100_000, 500_000, refresh) is None
+    assert tt.queue_end_commands(None, 500_000, refresh) is None
+    assert tt.queue_end_commands(497_000, None, refresh) is None
+    commands = tt.queue_end_commands(497_000, 500_000, refresh)
+    assert commands[0] == {"type": "Idle", "delay": 2_000}
+    assert commands[1]["when"] == "${!videoPlaying}" and commands[1]["commands"] == [refresh]
+    assert commands[2]["when"] == "${videoPlaying}"
+    assert commands[2]["commands"][-1] == {"type": "SendEvent", "arguments": ["QueueEnded"]}
+    # past the end (late refresh): stop at once
+    assert tt.queue_end_commands(501_000, 500_000, refresh)[0]["delay"] == 0
