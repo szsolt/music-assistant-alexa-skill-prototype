@@ -8,6 +8,9 @@
       "version": "1.7.0"
     }
   ],
+  "settings": {
+    "idleTimeout": 1800000
+  },
   "resources": [
     {
       "description": "Default resource definitions for Audio template",
