@@ -453,14 +453,13 @@
                       ]
                     },
                     {
-                      "description": "Doorbell test: a hidden image the Show reloads from the skill over the LAN. An error answer means news (see the skill's bell.py).",
+                      "description": "Doorbell test: a hidden image the Show reloads from the skill over the LAN. An error answer means news (see the skill's bell.py). Visible (but transparent): the Show may not load an image it doesn't draw.",
                       "type": "Image",
                       "id": "bell",
                       "when": "${bellUrl != ''}",
-                      "width": 1,
-                      "height": 1,
+                      "width": 4,
+                      "height": 4,
                       "position": "absolute",
-                      "opacity": 0,
                       "source": "${bellUrl}${bellTick}.png",
                       "onLoad": [
                         {
@@ -487,6 +486,17 @@
                           ]
                         }
                       ]
+                    },
+                    {
+                      "description": "Doorbell test: what the page sees, on screen (the skill can't read these binds).",
+                      "type": "Text",
+                      "id": "bellDebug",
+                      "when": "${bellUrl != ''}",
+                      "position": "absolute",
+                      "top": 0,
+                      "left": 0,
+                      "fontSize": "20dp",
+                      "text": "bell ${bellTick}: ${bellLoads} ok, ${bellFails} fail"
                     },
                     {
                       "description": "Determinate Slider Container",
