@@ -829,25 +829,29 @@ class APLUserEventHandler(AbstractRequestHandler):
             logger.info("APL play button at %s ms", position_ms)
             if _resume_through_ma(handler_input, position_ms) != "ok":
                 # MA won't send a stream: play the page's own one.
-                util.execute_apl_commands(handler_input.response_builder, _UNDO_BUTTON_PRESS)
-            self._schedule_refresh(handler_input)
+                self._schedule_refresh(handler_input, _UNDO_BUTTON_PRESS)
+            else:
+                self._schedule_refresh(handler_input)
             return handler_input.response_builder.set_should_end_session(None).response
         if arguments[0] in ("Next", "Previous"):
             command = arguments[0].lower()
             logger.info("APL %s button", command)
-            if _next_or_previous_to_ma(handler_input, command) != "ok":
-                # MA won't send a new stream: undo the page's pause and overlay.
-                util.execute_apl_commands(handler_input.response_builder, _UNDO_BUTTON_PRESS)
             # A button press stops the page's running command sequence, and with
             # it the refresh chain; restart it in case MA doesn't relaunch us.
-            self._schedule_refresh(handler_input)
+            if _next_or_previous_to_ma(handler_input, command) != "ok":
+                # MA won't send a new stream: undo the page's pause and overlay.
+                self._schedule_refresh(handler_input, _UNDO_BUTTON_PRESS)
+            else:
+                self._schedule_refresh(handler_input)
             return handler_input.response_builder.set_should_end_session(None).response
 
+        # One ExecuteCommands directive for the whole answer: each new one
+        # cancels the commands still running from the one before (a loading
+        # PlayMedia, and the commands after it).
+        commands, media = [], []
         handed = live_page.take(_device_id_from(handler_input))
         if handed:
-            commands = self._take_handoff(handler_input, *handed)
-            if commands:
-                util.execute_apl_commands(handler_input.response_builder, commands)
+            commands, media = self._take_handoff(handler_input, *handed)
             if handed[0] == "stream":
                 # the video starts the new stream at 0
                 arguments = ["MetadataRefresh", arguments[1] if len(arguments) > 1 else 0, 0]
@@ -876,12 +880,17 @@ class APLUserEventHandler(AbstractRequestHandler):
                 except Exception:
                     logger.exception("Failed to update APL metadata")
             try:
-                util.execute_apl_commands(handler_input.response_builder,
-                                          _track_time_commands(handler_input, arguments))
+                commands += _track_time_commands(handler_input, arguments)
             except Exception:
                 logger.exception("Failed to update APL track time")
 
-        self._schedule_refresh(handler_input)
+        # The media command runs next to the refresh timer: whether or not it
+        # completes before the stream plays, the refreshes go on.
+        refresh = util.apl_refresh_commands()
+        if media:
+            refresh = [{"type": "Parallel",
+                        "commands": media + [{"type": "Sequential", "commands": refresh}]}]
+        util.execute_apl_commands(handler_input.response_builder, commands + refresh)
 
         # Unset, not False: False opens the mic on every refresh and ducks the music;
         # the APL page keeps the session alive by itself.
@@ -889,26 +898,28 @@ class APLUserEventHandler(AbstractRequestHandler):
 
     @staticmethod
     def _take_handoff(handler_input, command, value):
-        """APL commands for what MA handed this open page instead of speaking."""
+        """(APL commands, media commands) for what MA handed this open page instead of speaking."""
         logger.info("Open page takes %s from MA", command)
         if command == "stream":
             _track_changes.forget(_session_id_from(handler_input))
-            return [{"type": "PlayMedia", "componentId": "videoPlayer", "source": value,
-                     "audioTrack": "background"},
-                    {"type": "SetValue", "componentId": "AudioPlayerRoot",
-                     "property": "videoProgressValue", "value": 0}] + _UNDO_BUTTON_PRESS[1:]
+            return ([{"type": "SetValue", "componentId": "AudioPlayerRoot",
+                      "property": "videoProgressValue", "value": 0}] + _UNDO_BUTTON_PRESS[1:],
+                    [{"type": "PlayMedia", "componentId": "videoPlayer", "source": value,
+                      "audioTrack": "background"}])
         if command == "pause":
-            return [{"type": "ControlMedia", "componentId": "videoPlayer", "command": "pause"}]
+            return [], [{"type": "ControlMedia", "componentId": "videoPlayer", "command": "pause"}]
         # resume: MA sends a new stream from the paused position, handed over the same way
         if _resume_through_ma(handler_input) != "ok":
-            return [{"type": "ControlMedia", "componentId": "videoPlayer", "command": "play"}]
-        return []
+            return [], [{"type": "ControlMedia", "componentId": "videoPlayer", "command": "play"}]
+        return [], []
 
     @staticmethod
-    def _schedule_refresh(handler_input):
-        # Always schedule the next refresh so polling continues.
+    def _schedule_refresh(handler_input, commands=()):
+        # Always schedule the next refresh so polling continues; other commands
+        # go in the same directive (a later one would cancel them).
         try:
-            util.schedule_apl_refresh(handler_input.response_builder)
+            util.execute_apl_commands(handler_input.response_builder,
+                                      list(commands) + util.apl_refresh_commands())
         except Exception:
             logger.exception("Failed to schedule APL refresh")
 

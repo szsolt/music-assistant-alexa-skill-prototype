@@ -402,6 +402,24 @@ def execute_apl_commands(response_builder, commands):
     )
 
 
+def apl_refresh_commands(delay_ms=1000):
+    """APL commands that ask for the next metadata refresh after delay_ms."""
+    return [
+        {
+            "type": "Idle",
+            "delay": int(delay_ms)
+        },
+        {
+            "type": "SendEvent",
+            "arguments": [
+                "MetadataRefresh",
+                "${refreshTick}",
+                "${videoProgressValue}"
+            ]
+        }
+    ]
+
+
 def schedule_apl_refresh(response_builder, delay_ms=1000):
     """Schedule the next APL metadata refresh via a UserEvent.
 
@@ -410,24 +428,9 @@ def schedule_apl_refresh(response_builder, delay_ms=1000):
     if not apl_enabled():
         return
     try:
-        commands = [
-            {
-                "type": "Idle",
-                "delay": int(delay_ms)
-            },
-            {
-                "type": "SendEvent",
-                "arguments": [
-                    "MetadataRefresh",
-                    "${refreshTick}",
-                    "${videoProgressValue}"
-                ]
-            }
-        ]
-
         response_builder.add_directive(
             ExecuteCommandsDirective(
-                commands=commands,
+                commands=apl_refresh_commands(delay_ms),
                 token="playbackToken"
             )
         )
