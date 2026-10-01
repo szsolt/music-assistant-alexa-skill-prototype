@@ -451,26 +451,8 @@
                                   "accessibilityLabel": "${videoPlaying ? 'Pause' : 'Play'}",
                                   "width": "@primaryControlSize",
                                   "height": "@primaryControlSize",
-                                  "description": "Pause stops the page at once and tells MA; play goes through MA, which sends a stream from the paused position.",
+                                  "description": "Pause stops the page at once and tells MA; play goes through MA, which sends a stream from the paused position. The play branch comes first: the pause branch flips videoPlaying, and a play branch after it would run too.",
                                   "onPress": [
-                                    {
-                                      "type": "Sequential",
-                                      "when": "${videoPlaying}",
-                                      "commands": [
-                                        {
-                                          "type": "ControlMedia",
-                                          "componentId": "videoPlayer",
-                                          "command": "pause"
-                                        },
-                                        {
-                                          "type": "SendEvent",
-                                          "arguments": [
-                                            "Pause",
-                                            "${videoProgressValue - trackOffset}"
-                                          ]
-                                        }
-                                      ]
-                                    },
                                     {
                                       "type": "Sequential",
                                       "when": "${!videoPlaying}",
@@ -497,6 +479,24 @@
                                           "type": "SendEvent",
                                           "arguments": [
                                             "Play",
+                                            "${videoProgressValue - trackOffset}"
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "Sequential",
+                                      "when": "${videoPlaying}",
+                                      "commands": [
+                                        {
+                                          "type": "ControlMedia",
+                                          "componentId": "videoPlayer",
+                                          "command": "pause"
+                                        },
+                                        {
+                                          "type": "SendEvent",
+                                          "arguments": [
+                                            "Pause",
                                             "${videoProgressValue - trackOffset}"
                                           ]
                                         }
