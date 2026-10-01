@@ -489,6 +489,8 @@
                         },
                         {
                           "type": "SendEvent",
+                          "description": "On its own sequencer: onFail runs in fast mode, which drops SendEvent, but a command with a named sequencer runs in normal mode (APL core Sequencer::execute). The skill's commands and the buttons only reset the main sequencer.",
+                          "sequencer": "bellPull",
                           "arguments": [
                             "BellFail",
                             "${event.errorCode}",
