@@ -233,7 +233,8 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
         # shows, or shows without ever sending a refresh.
         logger.info("Player page response built in %d ms (APL: %s)",
                     (time.monotonic() - started) * 1000, _supports_apl(handler_input))
-        if _supports_apl(handler_input):
+        # Only a page sends events that cancel the watchdog.
+        if _supports_apl(handler_input) and util.apl_enabled():
             live_page.closed(_device_id_from(handler_input))
             _watch_page(_device_id_from(handler_input))
         return response
@@ -290,7 +291,9 @@ def _watch_page(device_id):
 def _page_heard_from(handler_input):
     """The Echo's page sent an event or closed: no resend needed."""
     if not is_request_type("Alexa.Presentation.APL.UserEvent")(handler_input):
-        live_page.closed(_device_id_from(handler_input))
+        # On a SessionEnded nothing else tells MA the page missed its hand-off.
+        live_page.closed(_device_id_from(handler_input),
+                         fall_back=is_request_type("SessionEndedRequest")(handler_input))
     with _page_watch_lock:
         timer = _page_watch.pop(_device_id_from(handler_input), None)
     if timer:

@@ -11,8 +11,8 @@ stream (or the pause) with its next refresh.
 MA must say it can leave the speaking out (canSkipSpeech in its request),
 else it speaks anyway and a new page arrives: the open page must not also
 switch, or the Show would fetch the stream twice and MA would restart it.
-If the page doesn't take a hand-off in time (closed meanwhile), on_missed
-runs, to have MA send it the spoken way.
+If the page doesn't take a hand-off in time, or closes before it does,
+on_missed runs, to have MA send it the spoken way.
 """
 
 import threading
@@ -38,13 +38,17 @@ def heard_from(device_id, now=None):
             _last_event[device_id] = time.monotonic() if now is None else now
 
 
-def closed(device_id):
-    """The device's page closed or was replaced: no open page, no hand-off."""
+def closed(device_id, fall_back=False):
+    """The device's page closed or was replaced: no open page, no hand-off.
+
+    fall_back: run on_missed for a hand-off the page didn't take. Not when
+    a new page replaces it (it has the latest stream), nor on a Stop (the
+    skill syncs the stop to MA).
+    """
     with _lock:
         _last_event.pop(device_id, None)
         entries = _handoff.pop(device_id, [])
-    for entry in entries:
-        _disarm(entry)
+    _drop(device_id, entries, fall_back)
 
 
 def is_live(device_id, now=None):
@@ -111,16 +115,19 @@ def _arm(device_id, entry):
                 return
             queue = _handoff.pop(device_id)
             _last_event.pop(device_id, None)   # not open after all
-        for old in queue[1:]:
-            _disarm(old)
-        # MA's latest command counts: a stream with a pause behind it falls back as a pause.
-        latest = queue[-1]
-        if latest[2]:
-            latest[2](device_id, latest[0])
+        _drop(device_id, queue, fall_back=True)
 
     entry[3] = threading.Timer(HANDOFF_SECONDS, missed)
     entry[3].daemon = True
     entry[3].start()
+
+
+def _drop(device_id, queue, fall_back):
+    for entry in queue:
+        _disarm(entry)
+    # MA's latest command counts: a stream with a pause behind it falls back as a pause.
+    if fall_back and queue and queue[-1][2]:
+        queue[-1][2](device_id, queue[-1][0])
 
 
 def _disarm(entry):

@@ -112,3 +112,17 @@ def test_pause_wait_starts_when_stream_is_taken(monkeypatch):
     threading.Event().wait(0.1)          # 0.25 s after the offer, 0.1 s after the take
     assert lp.take("d") == ("pause", None)
     assert got == []
+
+
+def test_closed_falls_back_for_untaken_handoff_only_when_asked():
+    got = []
+    lp.heard_from("d")
+    lp.offer("d", "stream", "u", on_missed=lambda d, c: got.append((d, c)))
+    lp.closed("d")
+    assert got == []
+    lp.heard_from("d")
+    lp.offer("d", "stream", "u", on_missed=lambda d, c: got.append((d, c)))
+    lp.offer("d", "pause", on_missed=lambda d, c: got.append((d, c)))
+    lp.closed("d", fall_back=True)
+    assert got == [("d", "pause")]
+    assert lp.take("d") is None
