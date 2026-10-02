@@ -116,9 +116,9 @@ def push_alexa_metadata(url):
             logging.exception('Unexpected error while pushing Alexa metadata')
 
 
-def play(url, offset, text, response_builder, supports_apl=False):
+def play(url, offset, text, response_builder, supports_apl=False, device_id=None):
     if supports_apl and apl_enabled():
-        add_apl(response_builder)
+        add_apl(response_builder, device_id=device_id)
     else:
         try:
             hostname = get_ma_hostname(raise_on_http_scheme=True)
@@ -264,12 +264,12 @@ def stop(text, response_builder, supports_apl=False):
     return response_builder.response
 
 
-def pause(text, response_builder, supports_apl=False, session_new=False):
+def pause(text, response_builder, supports_apl=False, session_new=False, device_id=None):
     if supports_apl and apl_enabled():
         try:
             if session_new:
                 try:
-                    add_apl(response_builder, start_paused=True)
+                    add_apl(response_builder, start_paused=True, device_id=device_id)
                 except Exception:
                     logging.exception('Failed to re-render APL on session new')
                 # Unset, not False: False opens the mic (as for the refresh).
@@ -415,8 +415,7 @@ def apl_refresh_commands(delay_ms=1000):
                 "MetadataRefresh",
                 "${refreshTick}",
                 "${videoProgressValue}",
-                "${bellLoads}",
-                "${bellFails}"
+                "${bellPage}"
             ]
         }
     ]

@@ -2,6 +2,7 @@ import os
 import sys
 from flask import Flask, request, jsonify, Response, g
 from flask_ask_sdk.skill_adapter import SkillAdapter
+from ask_sdk_webservice_support.verifier import RequestVerifier
 from skill.lambda_function import sb  # sb is the SkillBuilder from skill/lambda_function.py
 from skill import bell
 import json
@@ -94,6 +95,21 @@ except Exception:
     pass
 # Without a skill ID ask-sdk skips the check that a request is meant for this skill.
 sb.skill_id = os.environ.get('SKILL_ID') or sys.exit('SKILL_ID is not set')
+
+
+def _one_at_a_time(check):
+    # The certificate check reads the shared trust roots, which asn1crypto
+    # parses lazily and not thread-safely: two requests right after a start
+    # (a page's pull and a button press) failed with KeyErrors.
+    lock = threading.Lock()
+
+    def locked(self, cert_chain):
+        with lock:
+            return check(self, cert_chain)
+    return locked
+
+
+RequestVerifier._validate_cert_chain = _one_at_a_time(RequestVerifier._validate_cert_chain)
 skill_adapter = SkillAdapter(
     skill=sb.create(),
     skill_id=sb.skill_id,
@@ -290,10 +306,13 @@ def invoke_skill():
     return skill_adapter.dispatch_request()
 
 
-@app.route('/bell/<int:tick>.png', methods=['GET'])
-def bell_image(tick):
-    # Doorbell test for the player page (see skill/bell.py)
-    status, _ = bell.rang(tick)
+@app.route('/bell/<page>/<int:seen>/<int:tick>.png', methods=['GET'])
+@app.route('/bell/<page>/<int:seen>/<int:tick>/<press>.png', methods=['GET'])
+@app.route('/bell/<page>/<int:seen>/<int:tick>/<int:at>/<int:playing>/<press>.png', methods=['GET'])
+def bell_image(page, seen, tick, press=None, at=None, playing=None):
+    # The player page's doorbell (see skill/bell.py): a 404 tells the page to pull.
+    # The shorter URLs are from pages sent by older versions.
+    status = 200 if bell.rang(page, seen, press, at, playing) else 404
     resp = Response(bell.PNG if status == 200 else b'', status, mimetype='image/png')
     resp.headers['Cache-Control'] = 'no-store'
     return resp

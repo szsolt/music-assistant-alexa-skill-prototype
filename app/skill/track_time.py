@@ -52,8 +52,13 @@ def video_position_ms(arguments, index=2):
 
 
 def track_offset_ms(position_ms, elapsed_ms):
-    """Where the current track started in the page's video, in ms."""
-    return max(int(position_ms) - int(elapsed_ms), 0)
+    """Where the current track started in the page's video, in ms.
+
+    Below 0 when the page's stream started mid-track (a resume), else a
+    little below 0 is startup delay.
+    """
+    offset = int(position_ms) - int(elapsed_ms)
+    return offset if offset < -_MID_TRACK_START_MS else max(offset, 0)
 
 
 def choose_offset_ms(previous_end_ms, position_ms, elapsed_ms):
@@ -130,7 +135,9 @@ class TrackChangeTracker:
                 self._seen.move_to_end(session_id)
                 return False
             if old is None:
-                previous_end = 0   # a new page: its stream starts with this track
+                previous_end = None   # a page from before a restart: from its video position
+            elif old["key"] is None:
+                previous_end = 0      # a new page: its stream starts with this track
             elif old["offset"] is not None and old["duration"]:
                 previous_end = old["offset"] + old["duration"]
             else:
@@ -148,10 +155,20 @@ class TrackChangeTracker:
             entry = self._seen.get(session_id)
             return entry["previous_end"] if entry else None
 
-    def forget(self, session_id):
-        """The session's page has a new stream: its next track is a new page's first."""
+    def offset(self, session_id):
+        """Where the current track starts in the session's video (ms), or None."""
         with self._lock:
-            self._seen.pop(session_id, None)
+            entry = self._seen.get(session_id)
+            return entry["offset"] if entry else None
+
+    def started(self, session_id):
+        """session_id is a new page, or its page has a new stream: its next track is its first."""
+        with self._lock:
+            self._seen[session_id] = {"key": None, "offset": None, "duration": None,
+                                      "last": False, "previous_end": 0}
+            self._seen.move_to_end(session_id)
+            while len(self._seen) > self._max:
+                self._seen.popitem(last=False)
 
     def record(self, session_id, offset_ms, duration_ms, last=False):
         """Remember where the current track lies, for the next change.
@@ -172,7 +189,12 @@ class TrackChangeTracker:
             return entry["offset"] + entry["duration"]
 
 
-def set_track_time_commands(offset_ms, duration_ms, shown_ms=None, queue_end_ms=None):
+# Per page (its id), shared by the pages the skill builds (apl.py) and their events.
+pages = TrackChangeTracker()
+
+
+def set_track_time_commands(offset_ms, duration_ms, shown_ms=None, queue_end_ms=None,
+                            upcoming=None):
     """APL SetValue commands for the page's trackOffset and trackDuration.
 
     offset_ms None leaves the offset as it is; duration_ms None or 0 shows
@@ -180,6 +202,9 @@ def set_track_time_commands(offset_ms, duration_ms, shown_ms=None, queue_end_ms=
     directly, for a paused page: the slider only follows the video's time
     updates, and a paused video sends none. queue_end_ms: where MA's queue
     ends in the video, on its last track (the page stops there); else 0.
+    upcoming: the next track (title, secondary, image, duration_ms), which
+    the page shows by itself at the track's end, before the skill's next
+    update arrives; None: nothing to switch to.
     """
     commands = [{"type": "SetValue", "componentId": "AudioPlayerRoot",
                  "property": "queueEnd", "value": int(queue_end_ms or 0)}]
@@ -188,6 +213,13 @@ def set_track_time_commands(offset_ms, duration_ms, shown_ms=None, queue_end_ms=
                          "property": "trackOffset", "value": int(offset_ms)})
     commands.append({"type": "SetValue", "componentId": "AudioPlayerRoot",
                      "property": "trackDuration", "value": int(duration_ms or 0)})
+    upcoming = upcoming or {}
+    for prop, value in (("nextTitle", upcoming.get("title", "")),
+                        ("nextSecondary", upcoming.get("secondary", "")),
+                        ("nextImage", upcoming.get("image", "")),
+                        ("nextDuration", int(upcoming.get("duration_ms") or 0) if upcoming else -1)):
+        commands.append({"type": "SetValue", "componentId": "AudioPlayerRoot",
+                         "property": prop, "value": value})
     if shown_ms is not None:
         commands.append({"type": "SetValue", "componentId": "slider",
                          "property": "progressValue", "value": max(int(shown_ms), 0)})

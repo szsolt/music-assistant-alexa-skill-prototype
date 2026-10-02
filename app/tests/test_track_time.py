@@ -21,6 +21,7 @@ def test_offset_is_position_minus_elapsed():
 def test_offset_never_negative():
     # a fresh page: the video lags MA's clock slightly
     assert tt.track_offset_ms(300, 1_200) == 0
+    assert tt.track_offset_ms(67_000, 196_000) == -129_000   # a stream from a resume
 
 
 def test_tracker_reports_each_change_once_per_session():
@@ -50,13 +51,25 @@ def test_track_key_uses_stream_and_titles():
 
 def test_set_track_time_commands():
     cmds = tt.set_track_time_commands(388_000, 215_000)
-    assert [(c["property"], c["value"]) for c in cmds] == [("queueEnd", 0), ("trackOffset", 388_000), ("trackDuration", 215_000)]
+    assert [(c["property"], c["value"]) for c in cmds] == [("queueEnd", 0), ("trackOffset", 388_000), ("trackDuration", 215_000),
+        ("nextTitle", ""), ("nextSecondary", ""), ("nextImage", ""), ("nextDuration", -1)]
     assert all(c["componentId"] == "AudioPlayerRoot" for c in cmds)
+
+
+def test_commands_carry_the_next_track():
+    upcoming = {"title": "B", "secondary": "Artist - Album", "image": "https://i/b", "duration_ms": 180_000}
+    cmds = tt.set_track_time_commands(0, 215_000, upcoming=upcoming)
+    assert [(c["property"], c["value"]) for c in cmds][-4:] == [
+        ("nextTitle", "B"), ("nextSecondary", "Artist - Album"), ("nextImage", "https://i/b"),
+        ("nextDuration", 180_000)]
+    unknown_length = dict(upcoming, duration_ms=0)
+    assert tt.set_track_time_commands(0, 215_000, upcoming=unknown_length)[-1]["value"] == 0
 
 
 def test_set_track_time_commands_unknown():
     cmds = tt.set_track_time_commands(None, None)
-    assert [(c["property"], c["value"]) for c in cmds] == [("queueEnd", 0), ("trackDuration", 0)]
+    assert [(c["property"], c["value"]) for c in cmds] == [("queueEnd", 0), ("trackDuration", 0),
+                                                                 ("nextTitle", ""), ("nextSecondary", ""), ("nextImage", ""), ("nextDuration", -1)]
 
 
 def test_offset_prefers_previous_track_end():
@@ -72,6 +85,7 @@ def test_offset_falls_back_to_position_then_none():
 
 def test_tracker_chains_track_ends_within_a_page():
     t = tt.TrackChangeTracker()
+    t.started("s1")
     t.changed("s1", ("u", "Rain", ""))
     assert t.previous_end("s1") == 0          # first track of a page
     t.record("s1", 0, 10_000)
@@ -132,7 +146,7 @@ def test_commands_set_slider_when_paused():
     cmds = tt.set_track_time_commands(-34_760, 326_000, shown_ms=34_760)
     assert cmds[-1] == {"type": "SetValue", "componentId": "slider",
                         "property": "progressValue", "value": 34_760}
-    assert len(tt.set_track_time_commands(-34_760, 326_000)) == 3
+    assert len(tt.set_track_time_commands(-34_760, 326_000)) == 7
 
 
 def test_queue_end_only_on_the_last_track():
@@ -162,3 +176,12 @@ def test_set_track_time_commands_queue_end():
             "property": "queueEnd", "value": 290_000} in commands
     # not on the last track: cleared, so a page that was on it doesn't stop
     assert tt.set_track_time_commands(0, 300_000)[0]["value"] == 0
+
+
+def test_tracker_page_it_did_not_start_has_no_previous_end():
+    t = tt.TrackChangeTracker()
+    t.changed("taken-on", ("u", "Song", ""))
+    assert t.previous_end("taken-on") is None   # from the video position instead
+    t.started("taken-on")                        # a new stream
+    t.changed("taken-on", ("u", "Song", ""))
+    assert t.previous_end("taken-on") == 0

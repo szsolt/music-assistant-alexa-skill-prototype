@@ -34,6 +34,8 @@ from env_secrets import get_env_secret
 from . import track_time
 
 logger = logging.getLogger(__name__)
+# The client logs every connect; the player page's check connects every few seconds.
+logging.getLogger("music_assistant_client").setLevel(logging.WARNING)
 
 SUPPORTED_COMMANDS = ("next", "previous", "start_over", "pause", "stop", "resume")
 
@@ -146,14 +148,39 @@ async def _get_track_time(server_url, token, player_id):
             return (int(duration * 1000) if duration else None,
                     int(queue.corrected_elapsed_time * 1000),
                     queue.state == PlaybackState.PAUSED,
-                    queue.next_item is None)
+                    queue.next_item is None,
+                    _upcoming(client, queue.next_item))
+
+
+def _upcoming(client, item):
+    """What the page shows for the queue's next item: title, artist - album, image, length."""
+    if item is None:
+        return None
+    media = item.media_item
+    title = (media.name if media else None) or item.name or ""
+    version = getattr(media, "version", None)
+    if version:
+        title = f"{title} ({version})"
+    artist = getattr(media, "artist_str", "") or ""
+    album = getattr(getattr(media, "album", None), "name", "") or ""
+    try:
+        image = client.get_media_item_image_url(item, size=512) or ""
+    except Exception:
+        image = ""
+    duration = getattr(media, "duration", None) or item.duration
+    return {"title": title,
+            "secondary": " - ".join(part for part in (artist, album) if part),
+            "image": image,
+            "duration_ms": int(duration * 1000) if duration else 0}
 
 
 def get_current_track_time(player_id):
-    """(duration_ms, elapsed_ms, paused, last) of MA's current track on player_id, or None.
+    """(duration_ms, elapsed_ms, paused, last, upcoming) of MA's current track on player_id, or None.
 
     duration_ms is None when MA doesn't know the length (e.g. radio); last
-    is True when nothing follows it in the queue.
+    is True when nothing follows it in the queue. upcoming: the next
+    track's title, secondary (artist - album), image and duration_ms (0 if
+    unknown), or None: the page switches to it at the track's end.
     Called once per track change from the APL refresh, not per refresh.
     """
     server_url = get_env_secret("MA_API_URL")
@@ -169,6 +196,32 @@ def get_current_track_time(player_id):
         logger.warning("Music Assistant could not return the queue of player %s: %s", player_id, e)
     except Exception:
         logger.exception("Unexpected error reading track time of MA player %s", player_id)
+    return None
+
+
+async def _get_queue_state(server_url, token, player_id):
+    async with aiohttp.ClientSession() as session:
+        async with MusicAssistantClient(server_url, session, token=token) as client:
+            queue = await client.player_queues.get_active_queue(player_id)
+            if queue is None or queue.current_item is None:
+                return None
+            return queue.state.value, int(queue.corrected_elapsed_time * 1000)
+
+
+def get_queue_state(player_id):
+    """(state, elapsed_ms) of MA's queue on player_id, or None.
+
+    state is MA's playback state: "playing", "paused" or "idle". For the
+    player page's check every few seconds (bell.py).
+    """
+    server_url = get_env_secret("MA_API_URL")
+    token = get_env_secret("MA_API_TOKEN")
+    if not server_url:
+        return None
+    try:
+        return asyncio.run(_get_queue_state(server_url, token, player_id))
+    except Exception as e:
+        logger.debug("Could not read the queue state of MA player %s: %s", player_id, e)
     return None
 
 

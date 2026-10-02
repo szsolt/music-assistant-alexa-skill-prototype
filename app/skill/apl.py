@@ -3,10 +3,11 @@
 import json
 import logging
 import os
+import secrets
 import sys
 from ask_sdk_model.interfaces.alexa.presentation.apl import RenderDocumentDirective
 from ask_sdk_core.response_helper import ResponseFactory
-from . import data
+from . import bell, data, track_time
 
 # Ensure /app/src is on the Python path so shared_store can be imported
 _app_src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -34,9 +35,37 @@ def _components(node):
             yield from _components(child)
 
 
-def add_apl(response_builder, start_paused=False):
-    # type: (ResponseFactory, bool) -> None
-    """Add the RenderDocumentDirective to the response with APL document."""
+# Set by the skill (set_start_track_time): start_track_time(device_id) is
+# (track offset ms, track duration ms) for a new page, or None.
+_start_track_time = None
+
+
+def set_start_track_time(fn):
+    global _start_track_time
+    _start_track_time = fn
+
+
+def _start_values(device_id):
+    """The page's first trackOffset and trackDuration: the slider is right from the start."""
+    if not _start_track_time or not device_id:
+        return {}
+    try:
+        start = _start_track_time(device_id)
+    except Exception:
+        logging.exception("Could not get the track time for a new page")
+        return {}
+    if not start or start[0] is None:
+        return {}
+    return {"startOffset": int(start[0]), "startDuration": int(start[1] or 0)}
+
+
+def add_apl(response_builder, start_paused=False, device_id=None):
+    # type: (ResponseFactory, bool, str) -> None
+    """Add the RenderDocumentDirective to the response with APL document.
+
+    Every page gets a random id, which its events carry back. With device_id
+    (and APL_BELL_URL) the page also gets a doorbell (see bell.py).
+    """
     # Import here to avoid circular imports
     from .util import get_ma_hostname, replace_ip_in_url
 
@@ -84,9 +113,16 @@ def add_apl(response_builder, start_paused=False):
             "headerSubtitle": metadata.get("headerSubtitle", ""),
             "primaryText": metadata.get("primaryText", ""),
             "secondaryText": metadata.get("secondaryText", ""),
-            # Doorbell test (see bell.py): where the Show finds the skill on the LAN
-            "bellUrl": os.environ.get("APL_BELL_URL", "").strip(),
         })
+        # The page's doorbell (see bell.py): where the Show finds the skill on the LAN
+        bell_page = bell.new_page(device_id)
+        page_id = bell_page or secrets.token_hex(8)
+        track_time.pages.started(page_id)   # its stream starts with the current track
+        main_template_item.update({
+            "bellUrl": bell.base_url() if bell_page else "",
+            "bellPage": page_id,
+        })
+        main_template_item.update(_start_values(device_id))
     except (KeyError, IndexError):
         logging.warning("Could not update mainTemplate in APL document")
 

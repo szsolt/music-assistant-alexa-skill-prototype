@@ -6,7 +6,7 @@ import time
 from urllib.parse import urlparse, urlunparse
 import logging
 import shared_store
-from skill import device_mapping, live_page, ma_control
+from skill import bell, device_mapping, live_page, ma_control
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,7 @@ def _offer_to_open_page(data, command, value=None):
     for device_id in device_mapping.get_devices_for_player(player_id):
         if live_page.offer(device_id, command, value, on_missed=_fall_back_to_speech(player_id)):
             logger.info("Handing %s to the open page on %s", command, player_id)
+            bell.news([device_id])
             return True
     return False
 
@@ -75,17 +76,20 @@ def register_routes(bp):
         stream_url = _rewrite_url(stream_url)
         image_url = _rewrite_url(data.get('imageUrl'))
 
-        shared_store._version += 1
-        shared_store._store = {
+        shared_store.save({
             'streamUrl': stream_url,
             'title': data.get('title'),
             'artist': data.get('artist'),
             'album': data.get('album'),
             'imageUrl': image_url,
             'playerId': data.get('playerId'),
-            'version': shared_store._version,
+            'version': shared_store._version + 1,
             'timestamp': time.time()
-        }
+        })
+        if not data.get('playerId'):
+            # MA's new metadata for its stream (a track change in its flow):
+            # pages with a doorbell pull it.
+            bell.news()
         page_live = _offer_to_open_page(data, 'stream', stream_url)
         if not page_live:
             device_mapping.wait_for_pairing(data.get('playerId'))

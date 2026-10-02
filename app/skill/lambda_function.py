@@ -13,7 +13,7 @@ from ask_sdk_core.utils import is_request_type, is_intent_name
 from ask_sdk_core.handler_input import HandlerInput
 from ask_sdk_model import Response
 
-from . import data, util, device_mapping, live_page, ma_control, track_time, bell
+from . import data, util, device_mapping, live_page, ma_control, track_time, bell, apl
 
 sb = StandardSkillBuilder()
 # sb = StandardSkillBuilder(
@@ -227,7 +227,8 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
             offset=0,
             text=data.WELCOME_MSG,
             response_builder=handler_input.response_builder,
-            supports_apl=_supports_apl(handler_input)
+            supports_apl=_supports_apl(handler_input),
+            device_id=_device_id_from(handler_input)
         )
         # Alexa drops a response that takes over ~8 s: then the page never
         # shows, or shows without ever sending a refresh.
@@ -346,6 +347,10 @@ def _device_id_from(handler_input):
 
 
 def _sync_to_ma_unless_echo(handler_input, command, unless_paused=False):
+    _sync_device_to_ma(_device_id_from(handler_input), command, unless_paused)
+
+
+def _sync_device_to_ma(device_id, command, unless_paused=False):
     """Best-effort: forward pause/stop/resume to MA, unless this request is
     the echo of a command we ourselves just triggered on MA (see ma_control
     docstring for why that echo happens and must be suppressed once).
@@ -355,7 +360,6 @@ def _sync_to_ma_unless_echo(handler_input, command, unless_paused=False):
 
     unless_paused: leave a paused MA as it is (see CancelOrStopIntentHandler).
     """
-    device_id = _device_id_from(handler_input)
 
     if ma_control.is_echo_of_ma_command(device_id, command):
         logger.info("Suppressing MA %s: echo of our own MA-triggered command for device_id=%s", command, device_id)
@@ -374,13 +378,16 @@ def _sync_to_ma_unless_echo(handler_input, command, unless_paused=False):
 
 
 def _next_or_previous_to_ma(handler_input, command):
-    """Send next/previous to the MA player paired with the requesting Echo.
+    return _next_or_previous_for(_device_id_from(handler_input), command)
+
+
+def _next_or_previous_for(device_id, command):
+    """Send next/previous to the MA player paired with this Echo.
 
     Returns "ok", "unmapped" (Echo not paired in /devices) or "failed".
     MA then pushes the new stream and relaunches the skill, as for any
     track change.
     """
-    device_id = _device_id_from(handler_input)
     player_id = device_mapping.get_player_for_device(device_id)
     if not player_id:
         logger.warning("No MA player mapped for device_id=%s", device_id)
@@ -463,7 +470,8 @@ class PauseIntentHandler(AbstractRequestHandler):
         return util.pause(text=None,
                   response_builder=handler_input.response_builder,
                   supports_apl=_supports_apl(handler_input),
-                  session_new=session_new)
+                  session_new=session_new,
+                  device_id=_device_id_from(handler_input))
 
 
 class ResumeIntentHandler(AbstractRequestHandler):
@@ -498,7 +506,8 @@ class ResumeIntentHandler(AbstractRequestHandler):
             offset=offset,
             text=data.WELCOME_MSG,
             response_builder=handler_input.response_builder,
-            supports_apl=_supports_apl(handler_input)
+            supports_apl=_supports_apl(handler_input),
+            device_id=_device_id_from(handler_input)
         )
 
 
@@ -673,7 +682,8 @@ class PlaybackFailedHandler(AbstractRequestHandler):
             offset=0, 
             text=None,
             response_builder=handler_input.response_builder,
-            supports_apl=_supports_apl(handler_input)
+            supports_apl=_supports_apl(handler_input),
+            device_id=_device_id_from(handler_input)
         )
 
 
@@ -696,13 +706,15 @@ class ExceptionEncounteredHandler(AbstractRequestHandler):
 # ########## APL INTERFACE HANDLERS #################################
 # This section contains handlers related to APL interface
 
-_APL_EVENTS = ("MetadataRefresh", "Next", "Previous", "Pause", "Play", "QueueEnded", "BellFail")
+_APL_EVENTS = ("MetadataRefresh", "Next", "Previous", "Pause", "Play", "Seek", "QueueEnded", "Pull")
+# Where a button's event carries its press number (bell.pressed).
+_PRESS_NUMBER_AT = {"Next": 1, "Previous": 1, "Play": 2, "Pause": 2, "Seek": 2}
 _UNDO_BUTTON_PRESS = [
     {"type": "ControlMedia", "componentId": "videoPlayer", "command": "play"},
     {"type": "SetValue", "componentId": "Busy_Overlay", "property": "opacity", "value": 0},
     {"type": "SetValue", "componentId": "Busy_Overlay", "property": "display", "value": "none"},
 ]
-_track_changes = track_time.TrackChangeTracker()
+_track_changes = track_time.pages
 
 _SKILL_NAME = "Music Assistant"
 
@@ -728,18 +740,21 @@ def _recall(store, device_id):
     return None
 
 
-def _take_stream_start(device_id):
-    start, valid_until = _stream_start.pop(device_id, (None, 0))
+def _take_stream_start(device_id, keep=False):
+    start, valid_until = (_stream_start.get if keep else _stream_start.pop)(device_id, (None, 0))
     return start if valid_until >= time.time() else None
 
 
 def _resume_through_ma(handler_input, position_ms=None):
+    return _resume_for(_device_id_from(handler_input), position_ms)
+
+
+def _resume_for(device_id, position_ms=None):
     """Resume MA at position_ms, else where the page or MA paused.
 
     Returns "ok", "unmapped" or "failed". MA pushes a new stream from that
     position and relaunches the skill, as for next/previous.
     """
-    device_id = _device_id_from(handler_input)
     player_id = device_mapping.get_player_for_device(device_id)
     if not player_id:
         logger.info("No MA player mapped for device_id=%s", (device_id or '')[-8:])
@@ -768,22 +783,35 @@ def _session_id_from(handler_input):
     return getattr(session, 'session_id', None) or _device_id_from(handler_input)
 
 
-def _track_time_commands(handler_input, arguments):
+# Where a page's events carry its id (the skill gives every page one, see apl.py).
+_PAGE_ID_AT = {"Pull": 4, "MetadataRefresh": 3}
+
+
+def _page_key(handler_input, arguments):
+    """The page an event comes from: its id, or (a page from before page ids) the session."""
+    index = _PAGE_ID_AT.get(arguments[0]) if arguments else None
+    if index is not None and len(arguments) > index and arguments[index]:
+        return str(arguments[index])
+    return _session_id_from(handler_input)
+
+
+def _track_time_commands(handler_input, arguments, page_key):
     """SetValue commands for trackOffset/trackDuration, or [] if unneeded.
 
     Only on a track change (or the first refresh of a new page): MA is
     asked once, and the page counts from its own video position after that.
+    Kept per page (page_key), so a new page always starts afresh.
     """
     key = track_time.track_key(data.info)
-    if not _track_changes.changed(_session_id_from(handler_input), key):
+    if not _track_changes.changed(page_key, key):
         return []
-    session_id = _session_id_from(handler_input)
+    session_id = page_key
     player_id = device_mapping.get_player_for_device(_device_id_from(handler_input))
     if not player_id:
         return []
     device_id = _device_id_from(handler_input)
     result = ma_control.get_current_track_time(player_id)
-    duration_ms, elapsed_ms, paused, last = result if result else (None, None, False, False)
+    duration_ms, elapsed_ms, paused, last, upcoming = result if result else (None, None, False, False, None)
     position_ms = track_time.video_position_ms(arguments)
     previous_end = _track_changes.previous_end(session_id)
     if previous_end == 0:   # a new page
@@ -798,21 +826,104 @@ def _track_time_commands(handler_input, arguments):
     else:
         offset = track_time.choose_offset_ms(previous_end, position_ms, elapsed_ms)
     _track_changes.record(session_id, offset, duration_ms, last)
-    logger.info("Track time for %s: duration=%s ms elapsed=%s ms paused=%s offset=%s ms last=%s",
-                player_id, duration_ms, elapsed_ms, paused, offset, last)
+    logger.info("Track time for %s: duration=%s ms elapsed=%s ms paused=%s offset=%s ms last=%s next=%s",
+                player_id, duration_ms, elapsed_ms, paused, offset, last,
+                upcoming and (upcoming["duration_ms"], bool(upcoming["image"])))
     shown = (position_ms or 0) - offset if paused and offset is not None else None
     return track_time.set_track_time_commands(offset, duration_ms, shown,
-                                              _track_changes.queue_end_ms(session_id))
+                                              _track_changes.queue_end_ms(session_id),
+                                              _with_ma_hostname(upcoming))
+
+
+def _with_ma_hostname(upcoming):
+    """upcoming with its image on MA's public hostname, as the current track's (util)."""
+    if not upcoming or not upcoming.get("image"):
+        return upcoming
+    try:
+        hostname = util.get_ma_hostname(raise_on_http_scheme=False)
+    except ValueError:
+        hostname = ''
+    if not hostname:
+        return upcoming
+    return dict(upcoming, image=util.replace_ip_in_url(upcoming["image"], hostname))
+
+
+def _start_track_time(device_id):
+    """(offset ms, duration ms) for a page the skill builds now, or None.
+
+    As the page's first refresh works it out (_track_time_commands), with
+    the video at 0. The refresh still does, and sets the same values.
+    """
+    player_id = device_mapping.get_player_for_device(device_id)
+    result = ma_control.get_current_track_time(player_id) if player_id else None
+    if not result:
+        return None
+    duration_ms, elapsed_ms, paused = result[:3]
+    offset = track_time.page_start_offset_ms(0, paused, _recall(_paused_at, device_id), elapsed_ms,
+                                             _take_stream_start(device_id, keep=True),
+                                             _recall(_ma_paused_at, device_id))
+    return offset, duration_ms
+
+
+apl.set_start_track_time(_start_track_time)
+
+
+def _press(device_id, kind, position_ms=None):
+    """Do what the page's button asks (pause, play, next, previous, seek), from either path.
+
+    False if the page should undo its press: MA won't send a new stream.
+    Pause: remember where, and pause MA. The page pauses itself; MA's pause
+    hand-off isn't needed (or, unpatched, MA makes the Echo hear "pause",
+    which reopens the page paused).
+    """
+    if kind == "pause":
+        logger.info("APL pause button at %s ms", position_ms)
+        _remember(_paused_at, device_id, position_ms)
+        _sync_device_to_ma(device_id, "pause")
+        live_page.take(device_id, "pause")
+        return True
+    if kind == "play":
+        logger.info("APL play button at %s ms", position_ms)
+        return _resume_for(device_id, position_ms) == "ok"
+    if kind == "seek":
+        # MA plays from there, also when it was paused: like a play at that position.
+        logger.info("APL seek to %s ms", position_ms)
+        return position_ms is not None and _resume_for(device_id, position_ms) == "ok"
+    logger.info("APL %s button", kind)
+    return _next_or_previous_for(device_id, kind) == "ok"
+
+
+def _lan_press(device_id, kind, position_ms):
+    """A button press that came over the LAN, through the page's bell (bell.py)."""
+    if kind in ("pause", "play", "next", "previous", "seek") and not _press(device_id, kind, position_ms):
+        bell.undo(device_id)
+
+
+def _ma_state_of(device_id, page_id):
+    """(MA state, MA elapsed ms, the page's track offset ms) for the bell's check, or None."""
+    player_id = device_mapping.get_player_for_device(device_id)
+    state = ma_control.get_queue_state(player_id) if player_id else None
+    if not state:
+        return None
+    return state[0], state[1], _track_changes.offset(page_id)
+
+
+bell.set_handlers(press=_lan_press, ma_state=_ma_state_of,
+                  pause_ma=lambda device_id: _sync_device_to_ma(device_id, "pause"))
 
 
 class APLUserEventHandler(AbstractRequestHandler):
     """Handler for APL UserEvent requests from the player page.
 
-    - MetadataRefresh: sent every couple of seconds; updates title, artist
-      and images, and on a track change the track time (see track_time).
-    - Next / Previous: the page's own buttons. They go to MA like "Alexa,
-      next" does; the page's video must not skip by itself, since it only
-      has the one flow stream the page was opened with.
+    - Pull: the page's doorbell (see bell.py) says there's news; the
+      answer has it, and the new state number for the page.
+    - MetadataRefresh: a page without a doorbell sends it every couple of
+      seconds. Both update title, artist and images, take MA's hand-offs,
+      and on a track change set the track time (see track_time).
+    - Next / Previous / Play / Pause / Seek: the page's own buttons and
+      seek bar (see _press).
+      They go to MA like "Alexa, next" does; the page's video must not skip
+      by itself, since it only has the one flow stream the page was opened with.
     """
     def can_handle(self, handler_input):
         # type: (HandlerInput) -> bool
@@ -826,24 +937,25 @@ class APLUserEventHandler(AbstractRequestHandler):
         _page_heard_from(handler_input)
         live_page.heard_from(_device_id_from(handler_input))
         arguments = _apl_event_arguments(handler_input)
-        if arguments[0] == "Pause":
-            # Remember where, pause MA, and pause the page in this answer.
-            # MA hands its pause back to this page (or, unpatched, makes the
-            # Echo hear "pause", which reopens the page paused).
-            device_id = _device_id_from(handler_input)
-            position_ms = track_time.video_position_ms(arguments, index=1)
-            logger.info("APL pause button at %s ms", position_ms)
-            _remember(_paused_at, device_id, position_ms)
-            _sync_to_ma_unless_echo(handler_input, "pause")
-            live_page.take(device_id, "pause")
-            self._schedule_refresh(handler_input, [
-                {"type": "ControlMedia", "componentId": "videoPlayer", "command": "pause"}])
-            return handler_input.response_builder.set_should_end_session(None).response
-        if arguments[0] == "Play":
-            position_ms = track_time.video_position_ms(arguments, index=1)
-            logger.info("APL play button at %s ms", position_ms)
-            if _resume_through_ma(handler_input, position_ms) != "ok":
-                # MA won't send a stream: play the page's own one.
+        if arguments[0] in _PRESS_NUMBER_AT:
+            # The page's buttons. The same press may have come over the LAN
+            # already (bell.py): then the skill acted on it, and this answer is empty.
+            kind = arguments[0].lower()
+            index = _PRESS_NUMBER_AT[arguments[0]]
+            number = arguments[index] if len(arguments) > index else None
+            if not bell.pressed(_device_id_from(handler_input), number, kind):
+                return handler_input.response_builder.set_should_end_session(None).response
+            position_ms = (track_time.video_position_ms(arguments, index=1)
+                           if kind in ("pause", "play", "seek") else None)
+            done = _press(_device_id_from(handler_input), kind, position_ms)
+            # A press stops the page's running command sequence, and with it a
+            # refresh chain: restart it (a page with a doorbell has no chain).
+            if kind == "pause":
+                self._schedule_refresh(handler_input, [
+                    {"type": "ControlMedia", "componentId": "videoPlayer", "command": "pause"}])
+            elif not done:
+                # MA won't send a new stream: undo the page's pause and overlay
+                # (play: play the page's own stream).
                 self._schedule_refresh(handler_input, _UNDO_BUTTON_PRESS)
             else:
                 self._schedule_refresh(handler_input)
@@ -855,35 +967,45 @@ class APLUserEventHandler(AbstractRequestHandler):
             logger.info("Queue ended on the page")
             _sync_to_ma_unless_echo(handler_input, "stop")
             return handler_input.response_builder.set_should_end_session(None).response
-        if arguments[0] == "BellFail":
-            # Doorbell test (see bell.py). If onFail ran in normal mode, it
-            # stopped the refresh chain: start it again.
-            bell.failed(arguments)
-            self._schedule_refresh(handler_input)
-            return handler_input.response_builder.set_should_end_session(None).response
-        if arguments[0] in ("Next", "Previous"):
-            command = arguments[0].lower()
-            logger.info("APL %s button", command)
-            # A button press stops the page's running command sequence, and with
-            # it the refresh chain; restart it in case MA doesn't relaunch us.
-            if _next_or_previous_to_ma(handler_input, command) != "ok":
-                # MA won't send a new stream: undo the page's pause and overlay.
-                self._schedule_refresh(handler_input, _UNDO_BUTTON_PRESS)
-            else:
-                self._schedule_refresh(handler_input)
-            return handler_input.response_builder.set_should_end_session(None).response
 
-        bell.page_counts(arguments)
+        if arguments[0] == "Pull":
+            # ["Pull", seen state number, video position, playing, page id]
+            device_id = _device_id_from(handler_input)
+            try:
+                seen = int(float(arguments[1]))
+            except (IndexError, TypeError, ValueError):
+                seen = 0
+            page_id = str(arguments[4]) if len(arguments) > 4 else ""
+            answer = bell.pull(page_id, device_id, seen)
+            if answer is None:
+                return handler_input.response_builder.set_should_end_session(None).response
+            state, handoffs = answer
+            logger.info("Page on %s pulls state %s", (device_id or "")[-8:], state)
+            return self._update_page(handler_input, arguments, handoffs, [
+                {"type": "SetValue", "componentId": "AudioPlayerRoot",
+                 "property": "bellSeen", "value": state}], refresh=False)
+
+        handed = live_page.take(_device_id_from(handler_input))
+        return self._update_page(handler_input, arguments, [handed] if handed else [], [],
+                                 refresh=True)
+
+    def _update_page(self, handler_input, arguments, handoffs, commands, refresh):
+        """The answer to a Pull or MetadataRefresh: the latest metadata and track time, and the hand-offs.
+
+        refresh: ask for the next MetadataRefresh (a page without a doorbell).
+        """
         # One ExecuteCommands directive for the whole answer: each new one
         # cancels the commands still running from the one before (a loading
         # PlayMedia, and the commands after it).
-        commands, media = [], []
-        handed = live_page.take(_device_id_from(handler_input))
-        if handed:
-            commands, media = self._take_handoff(handler_input, *handed)
+        page_key = _page_key(handler_input, arguments)
+        commands, media = list(commands), []
+        for handed in handoffs:
+            more, more_media = self._take_handoff(handler_input, page_key, *handed)
+            commands += more
+            media += more_media
             if handed[0] == "stream":
                 # the video starts the new stream at 0
-                arguments = ["MetadataRefresh", arguments[1] if len(arguments) > 1 else 0, 0]
+                arguments = [arguments[0], arguments[1] if len(arguments) > 1 else 0, 0]
 
         # Fetch latest metadata from Music Assistant
         changed = False
@@ -909,10 +1031,13 @@ class APLUserEventHandler(AbstractRequestHandler):
                 except Exception:
                     logger.exception("Failed to update APL metadata")
             try:
-                commands += _track_time_commands(handler_input, arguments)
+                commands += _track_time_commands(handler_input, arguments, page_key)
             except Exception:
                 logger.exception("Failed to update APL track time")
 
+        if not refresh:
+            util.execute_apl_commands(handler_input.response_builder, commands + media)
+            return handler_input.response_builder.set_should_end_session(None).response
         # The media command runs next to the refresh timer: whether or not it
         # completes before the stream plays, the refreshes go on.
         refresh = util.apl_refresh_commands()
@@ -926,11 +1051,15 @@ class APLUserEventHandler(AbstractRequestHandler):
         return handler_input.response_builder.set_should_end_session(None).response
 
     @staticmethod
-    def _take_handoff(handler_input, command, value):
-        """(APL commands, media commands) for what MA handed this open page instead of speaking."""
+    def _take_handoff(handler_input, page_key, command, value):
+        """(APL commands, media commands) for what MA (or the skill) hands this open page."""
+        if command == "undo":
+            # The skill couldn't do what a press over the LAN asked (bell.py).
+            logger.info("Page undoes its button press")
+            return list(_UNDO_BUTTON_PRESS), []
         logger.info("Open page takes %s from MA", command)
         if command == "stream":
-            _track_changes.forget(_session_id_from(handler_input))
+            _track_changes.started(page_key)
             return ([{"type": "SetValue", "componentId": "AudioPlayerRoot",
                       "property": "videoProgressValue", "value": 0}] + _UNDO_BUTTON_PRESS[1:],
                     [{"type": "PlayMedia", "componentId": "videoPlayer", "source": value,
@@ -944,8 +1073,12 @@ class APLUserEventHandler(AbstractRequestHandler):
 
     @staticmethod
     def _schedule_refresh(handler_input, commands=()):
-        # Always schedule the next refresh so polling continues; other commands
-        # go in the same directive (a later one would cancel them).
+        # Without a doorbell, always schedule the next refresh so polling
+        # continues; other commands go in the same directive (a later one
+        # would cancel them). A page with a doorbell needs no refresh.
+        if bell.has_page(_device_id_from(handler_input)):
+            util.execute_apl_commands(handler_input.response_builder, list(commands))
+            return
         try:
             util.execute_apl_commands(handler_input.response_builder,
                                       list(commands) + util.apl_refresh_commands())
@@ -989,7 +1122,8 @@ class PlayCommandHandler(AbstractRequestHandler):
             offset=0,
             text=None,
             response_builder=handler_input.response_builder,
-            supports_apl=_supports_apl(handler_input)
+            supports_apl=_supports_apl(handler_input),
+            device_id=_device_id_from(handler_input)
         )
 
 

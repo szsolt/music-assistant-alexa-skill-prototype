@@ -4,9 +4,10 @@
 Without this, every next/previous/resume ends with MA's provider making the
 Echo hear "play audio" (pause: "pause"). That is a new utterance: it ends
 the skill session, and the skill answers with a new page. While a page is
-open it asks the skill for a refresh every ~2.5 s, so instead the skill
-can tell MA "the page is open, leave it to me" and hand the page the new
-stream (or the pause) with its next refresh.
+open it asks the skill for a refresh every ~2.5 s (or, with a doorbell,
+bells every second: see bell.py), so instead the skill can tell MA "the
+page is open, leave it to me" and hand the page the new stream (or the
+pause) with its next refresh (pull).
 
 MA must say it can leave the speaking out (canSkipSpeech in its request),
 else it speaks anyway and a new page arrives: the open page must not also
@@ -86,6 +87,12 @@ def offer(device_id, command, value=None, on_missed=None):
     for old in dropped:
         _disarm(old)
     return True
+
+
+def waiting(device_id):
+    """True if a hand-off waits for the device's page."""
+    with _lock:
+        return bool(_handoff.get(device_id))
 
 
 def take(device_id, command=None):
