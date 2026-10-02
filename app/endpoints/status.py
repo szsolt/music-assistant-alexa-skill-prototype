@@ -354,6 +354,7 @@ def status():
         else:
             invocations_html = '<span class="muted">No recent invocations</span>'
         tpl = tpl.replace('__INVOCATIONS_HTML__', invocations_html)
+        tpl = tpl.replace('__VOICE_HTML__', _voice_html())
         return Response(tpl, status=200, mimetype='text/html')
     except Exception:
         html = """<!doctype html>
@@ -367,6 +368,41 @@ def status():
             </body>
             </html>"""
         return Response(html, status=200, mimetype='text/html')
+
+
+VOICE_BASE_DIR = Path(__file__).parent.parent / 'models'
+
+
+def _voice_html():
+    from skill import model_upload, voice_lists, voice_model
+    voice = voice_lists.load()
+    if not voice:
+        return '<span class="muted">Voice commands: library names not read yet</span>'
+    counts = ', '.join(f'{n} {kind}s' for kind, n in voice.get('counts', {}).items())
+    if model_upload.configured():
+        state = 'uploaded automatically'
+    else:
+        locales = sorted(p.stem for p in VOICE_BASE_DIR.glob('*.json') if voice_model.template_for(p.stem))
+        links = ' '.join(f'<a href="/status/voice-model/{l}.json">{l}</a>' for l in locales)
+        state = ('not uploaded (no LWA credentials). Download the model and paste it into the '
+                 'Alexa developer console JSON editor: ' + links)
+    return f'Voice commands: {escape(counts)}; {state}'
+
+
+@status_bp.route('/status/voice-model/<locale>.json', methods=['GET'])
+def status_voice_model(locale):
+    """The repo's model for locale with the voice commands and library names, for the developer console."""
+    from skill import voice_lists
+    base_path = VOICE_BASE_DIR / f'{locale}.json'
+    voice = voice_lists.load()
+    if not re.fullmatch(r'[a-z]{2}-[A-Z]{2}', locale) or not base_path.exists() or not voice:
+        return jsonify({'error': 'unknown locale or library names not read yet'}), 404
+    model = voice_lists.build_model(json.loads(base_path.read_text(encoding='utf-8')), locale, voice['types'])
+    if model is None:
+        return jsonify({'error': f'no voice commands for {locale} yet'}), 404
+    body = json.dumps(model, ensure_ascii=False, indent=2)
+    return Response(body, mimetype='application/json',
+                    headers={'Content-Disposition': f'attachment; filename={locale}.json'})
 
 
 @status_bp.route('/status/api', methods=['GET'])

@@ -6,6 +6,7 @@ from skill import live_page as lp
 def setup_function():
     lp._last_event.clear()
     lp._handoff.clear()
+    lp._claimed.clear()
 
 
 def test_live_only_after_recent_event():
@@ -126,3 +127,15 @@ def test_closed_falls_back_for_untaken_handoff_only_when_asked():
     lp.closed("d", fall_back=True)
     assert got == [("d", "pause")]
     assert lp.take("d") is None
+
+
+def test_a_claimed_stream_goes_only_to_the_reply():
+    lp.heard_from("d")
+    lp.claim("d")
+    assert lp.offer("d", "stream", "url")
+    assert lp.take("d") is None                         # the old page's refresh
+    assert lp.take("d", "stream", for_reply=True) == ("stream", "url")
+    lp.heard_from("d")
+    assert lp.offer("d", "stream", "url2")
+    assert lp.take("d") == ("stream", "url2")           # claim used up
+    lp.closed("d")

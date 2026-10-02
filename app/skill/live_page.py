@@ -27,6 +27,8 @@ COMMANDS = ("stream", "pause", "resume")
 
 _lock = threading.Lock()
 _last_event = {}   # device_id -> monotonic time of the page's last event
+# Devices whose next stream goes to a skill reply (a voice command), not the page.
+_claimed = set()
 # device_id -> hand-offs in the order the page takes them, each
 # [command, value, on_missed, Timer]: at most a stream and a pause after it.
 _handoff = {}
@@ -48,8 +50,20 @@ def closed(device_id, fall_back=False):
     """
     with _lock:
         _last_event.pop(device_id, None)
+        _claimed.discard(device_id)
         entries = _handoff.pop(device_id, [])
     _drop(device_id, entries, fall_back)
+
+
+def claim(device_id):
+    """The device's next stream is for a skill reply: the open page mustn't take it.
+
+    A voice command's reply brings its own page; if the old page took the
+    stream, the reply would only speak and leave that page stuck.
+    """
+    if device_id:
+        with _lock:
+            _claimed.add(device_id)
 
 
 def is_live(device_id, now=None):
@@ -95,15 +109,20 @@ def waiting(device_id):
         return bool(_handoff.get(device_id))
 
 
-def take(device_id, command=None):
+def take(device_id, command=None, for_reply=False):
     """(command, value) handed to the device's page, or None; once, in order.
 
-    With command, only a hand-off of that command is taken.
+    With command, only a hand-off of that command is taken. A claimed
+    stream goes only to the skill reply (for_reply).
     """
     with _lock:
         queue = _handoff.get(device_id)
         if not queue or (command is not None and queue[0][0] != command):
             return None
+        if device_id in _claimed and queue[0][0] == "stream":
+            if not for_reply:
+                return None
+            _claimed.discard(device_id)
         entry = queue.pop(0)
         if queue:
             _arm(device_id, queue[0])

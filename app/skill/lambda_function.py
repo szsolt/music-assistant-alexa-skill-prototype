@@ -13,7 +13,7 @@ from ask_sdk_core.utils import is_request_type, is_intent_name
 from ask_sdk_core.handler_input import HandlerInput
 from ask_sdk_model import Response
 
-from . import data, util, device_mapping, live_page, ma_control, track_time, bell, apl
+from . import data, util, device_mapping, live_page, ma_control, track_time, bell, apl, ma_voice, voice_commands
 
 sb = StandardSkillBuilder()
 # sb = StandardSkillBuilder(
@@ -544,7 +544,7 @@ class StartOverIntentHandler(AbstractRequestHandler):
 
 
 class LoopOrShuffleIntentHandler(AbstractRequestHandler):
-    """Handler for loop on/off, shuffle on/off intent."""
+    """Shuffle on/off and repeat (loop) on/off, on the paired MA player's queue."""
     def can_handle(self, handler_input):
         # type: (HandlerInput) -> bool
         return (is_intent_name("AMAZON.LoopOnIntent")(handler_input) or
@@ -555,10 +555,195 @@ class LoopOrShuffleIntentHandler(AbstractRequestHandler):
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
         logger.info("In LoopOrShuffleIntentHandler")
-
         _ = handler_input.attributes_manager.request_attributes["_"]
-        speech = _(data.NOT_POSSIBLE_MSG)
-        return handler_input.response_builder.speak(speech).response
+        name = handler_input.request_envelope.request.intent.name
+        on = name.endswith("OnIntent")
+
+        def run(player_id):
+            if "Shuffle" in name:
+                ma_voice.set_shuffle(player_id, on)
+                return _(data.SHUFFLE_ON_MSG if on else data.SHUFFLE_OFF_MSG)
+            ma_voice.set_repeat(player_id, on)
+            return _(data.REPEAT_ON_MSG if on else data.REPEAT_OFF_MSG)
+        return _voice_reply(handler_input, run)
+
+
+# How long a voice command waits for MA's new stream, to answer with it
+# in one reply. Alexa drops a reply that takes over ~8 s.
+_VOICE_WAIT_S = 5
+_VOICE_DEADLINE_S = 6.5
+
+
+class _PlayFailed(Exception):
+    """MA refused to play it; carries what to say."""
+
+
+def _voice_reply(handler_input, run):
+    """The reply for run(player_id): words to say, or a finished reply.
+
+    MA's errors become their own answers.
+    """
+    _ = handler_input.attributes_manager.request_attributes["_"]
+    player_id = device_mapping.get_player_for_device(_device_id_from(handler_input))
+    if not player_id:
+        speech = _(data.UNPAIRED_ECHO_MSG)
+    else:
+        try:
+            speech = run(player_id)
+        except _PlayFailed as e:
+            logger.warning("Voice command: MA refused to play it: %s", e.__cause__)
+            speech = str(e)
+        except ma_voice.MAUnavailable as e:
+            logger.warning("Voice command: MA unreachable: %s", e)
+            speech = _(data.MA_UNAVAILABLE_MSG)
+        except ma_voice.MAFailed as e:
+            logger.warning("Voice command: MA refused it: %s", e)
+            speech = _(data.MA_COMMAND_FAILED_MSG)
+    if not isinstance(speech, str):
+        return speech
+    return _speak(handler_input, speech)
+
+
+def _speak(handler_input, speech):
+    """A spoken reply that keeps an open player page.
+
+    Ending the session closes the page (or leaves it stuck), so with the
+    page open the session stays as it is, as for next and previous, and
+    a page without a doorbell gets its next refresh.
+    """
+    builder = handler_input.response_builder.speak(speech)
+    device_id = _device_id_from(handler_input)
+    if not (live_page.is_live(device_id) and _supports_apl(handler_input) and util.apl_enabled()):
+        return builder.set_should_end_session(True).response
+    if not bell.has_page(device_id):
+        util.execute_apl_commands(builder, util.apl_refresh_commands())
+    return builder.set_should_end_session(None).response
+
+
+def _wait_for_stream(device_id, seconds):
+    """MA's new stream for device_id's Echo, handed over within seconds, or None."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        taken = live_page.take(device_id, "stream", for_reply=True)
+        if taken:
+            return taken[1]
+        time.sleep(0.1)
+    return None
+
+
+def _play_and_answer(handler_input, started, start, speech):
+    """Start new music in MA and answer with its stream, in one reply.
+
+    MA pushes the new stream for the Echo. With the Echo marked live it
+    takes that as a hand-off and leaves out its spoken "play audio", so
+    this reply plays the stream and shows the page. This holds for an open
+    page too: the stream is claimed for the reply, so the old page can't
+    take it and be left stuck behind a spoken reply. If MA is too slow, the hand-off falls
+    back to MA's spoken way and the reply only speaks.
+    """
+    device_id = _device_id_from(handler_input)
+    live_page.closed(device_id)
+    live_page.heard_from(device_id)
+    live_page.claim(device_id)
+    try:
+        start()
+    except Exception:
+        live_page.closed(device_id)
+        raise
+    url = _wait_for_stream(device_id, min(_VOICE_WAIT_S, _VOICE_DEADLINE_S - (time.monotonic() - started)))
+    if url is None:
+        logger.info("Voice command: no stream from MA in time, MA starts it the spoken way")
+        live_page.closed(device_id, fall_back=True)
+        return handler_input.response_builder.speak(speech).set_should_end_session(True).response
+    response = util.play(url=url, offset=0, text=speech,
+                         response_builder=handler_input.response_builder,
+                         supports_apl=_supports_apl(handler_input), device_id=device_id)
+    if _supports_apl(handler_input) and util.apl_enabled():
+        live_page.closed(device_id)
+        _watch_page(device_id)
+    return response
+
+
+class VoicePlayHandler(AbstractRequestHandler):
+    """Play artist/album/song/playlist/anything, radio, queue and play next."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        request = handler_input.request_envelope.request
+        return (is_request_type("IntentRequest")(handler_input)
+                and request.intent.name in voice_commands.INTENTS)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        started = time.monotonic()
+        _ = handler_input.attributes_manager.request_attributes["_"]
+        intent = handler_input.request_envelope.request.intent
+        wanted = voice_commands.request_of(intent.name, intent.slots)
+        logger.info("Voice command %s: heard %r, by %r", intent.name, wanted["heard"], wanted["artist"])
+        if not wanted["heard"]:
+            # Asked once: the session stays open for the answer.
+            return (handler_input.response_builder.speak(_(data.WHAT_TO_PLAY_MSG))
+                    .ask(_(data.WHAT_TO_PLAY_MSG)).response)
+
+        def run(player_id):
+            match, score = ma_voice.find(wanted["heard"], wanted["kinds"], wanted["artist"])
+            if not match:
+                logger.info("Voice command: no match for %r (best score %.2f)", wanted["heard"], score)
+                return _(data.NOT_FOUND_MSG).format(wanted["heard"])
+            logger.info("Voice command: %r -> %s %r by %r (score %.2f, %s)", wanted["heard"], match["kind"],
+                        match["name"], match["artist"], score,
+                        "library" if match["from_library"] else "providers")
+            speech = voice_commands.answer(_, wanted, match)
+
+            def start():
+                try:
+                    ma_voice.play(player_id, match["uri"], wanted["option"], wanted["shuffle"], wanted["radio"])
+                except ma_voice.MAFailed as e:
+                    raise _PlayFailed(_(data.PLAY_FAILED_MSG).format(match["name"])) from e
+            if wanted["option"] != "replace":
+                start()
+                return speech
+            return _play_and_answer(handler_input, started, start, speech)
+        return _voice_reply(handler_input, run)
+
+
+class PlayRandomHandler(AbstractRequestHandler):
+    """Shuffle my library / play something random."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        return is_intent_name("PlayRandom")(handler_input)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        logger.info("In PlayRandomHandler")
+        started = time.monotonic()
+        _ = handler_input.attributes_manager.request_attributes["_"]
+
+        def run(player_id):
+            def start():
+                if not ma_voice.play_random(player_id):
+                    raise _PlayFailed(_(data.EMPTY_LIBRARY_MSG))
+            return _play_and_answer(handler_input, started, start, _(data.RANDOM_MSG))
+        return _voice_reply(handler_input, run)
+
+
+class WhatsPlayingHandler(AbstractRequestHandler):
+    """What's playing: title and artist from MA."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        return is_intent_name("WhatsPlaying")(handler_input)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        logger.info("In WhatsPlayingHandler")
+        _ = handler_input.attributes_manager.request_attributes["_"]
+
+        def run(player_id):
+            playing = ma_voice.now_playing(player_id)
+            if not playing:
+                return _(data.NOTHING_PLAYING_MSG)
+            title, artist = playing
+            return _(data.NOW_PLAYING_MSG).format(_(data.BY_MSG).format(title, artist) if artist else title)
+        return _voice_reply(handler_input, run)
 
 # ###################################################################
 
@@ -1317,6 +1502,9 @@ sb.add_request_handler(CancelOrStopIntentHandler())
 sb.add_request_handler(PauseCommandHandler())
 sb.add_request_handler(ResumeIntentHandler())
 sb.add_request_handler(StartOverIntentHandler())
+sb.add_request_handler(VoicePlayHandler())
+sb.add_request_handler(PlayRandomHandler())
+sb.add_request_handler(WhatsPlayingHandler())
 sb.add_request_handler(LoopOrShuffleIntentHandler())
 sb.add_request_handler(PlaybackStartedHandler())
 sb.add_request_handler(PlaybackFinishedHandler())

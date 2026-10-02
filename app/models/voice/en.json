@@ -1,0 +1,252 @@
+{
+ "_comment": "Voice commands, merged into each English locale's model by skill/model_upload.py. The MA_* types are filled from Music Assistant's library at upload time.",
+ "intents": [
+  {
+   "name": "PlayArtist",
+   "slots": [
+    {
+     "name": "mode",
+     "type": "MA_MODE"
+    },
+    {
+     "name": "artist",
+     "type": "MA_ARTIST"
+    }
+   ],
+   "samples": [
+    "{mode} artist {artist}",
+    "{mode} the artist {artist}",
+    "{mode} music by {artist}",
+    "{mode} songs by {artist}",
+    "{mode} something by {artist}",
+    "{mode} {artist} songs",
+    "{mode} {artist} music"
+   ]
+  },
+  {
+   "name": "PlayAlbum",
+   "slots": [
+    {
+     "name": "mode",
+     "type": "MA_MODE"
+    },
+    {
+     "name": "album",
+     "type": "MA_ALBUM"
+    },
+    {
+     "name": "artist",
+     "type": "MA_ARTIST"
+    }
+   ],
+   "samples": [
+    "{mode} album {album}",
+    "{mode} the album {album}",
+    "{mode} the album {album} by {artist}",
+    "{mode} album {album} by {artist}",
+    "{mode} {album} album",
+    "{mode} the {album} album"
+   ]
+  },
+  {
+   "name": "PlaySong",
+   "slots": [
+    {
+     "name": "mode",
+     "type": "MA_MODE"
+    },
+    {
+     "name": "song",
+     "type": "MA_SONG"
+    },
+    {
+     "name": "artist",
+     "type": "MA_ARTIST"
+    }
+   ],
+   "samples": [
+    "{mode} song {song}",
+    "{mode} the song {song}",
+    "{mode} the song {song} by {artist}",
+    "{mode} song {song} by {artist}",
+    "{mode} the track {song}",
+    "{mode} {song} by {artist}"
+   ]
+  },
+  {
+   "name": "PlayPlaylist",
+   "slots": [
+    {
+     "name": "mode",
+     "type": "MA_MODE"
+    },
+    {
+     "name": "playlist",
+     "type": "MA_PLAYLIST"
+    }
+   ],
+   "samples": [
+    "{mode} playlist {playlist}",
+    "{mode} the playlist {playlist}",
+    "{mode} my playlist {playlist}",
+    "{mode} my {playlist} playlist",
+    "{mode} the {playlist} playlist",
+    "{mode} {playlist} playlist"
+   ]
+  },
+  {
+   "name": "PlayAnything",
+   "slots": [
+    {
+     "name": "mode",
+     "type": "MA_MODE"
+    },
+    {
+     "name": "name",
+     "type": "MA_NAME"
+    }
+   ],
+   "samples": [
+    "{mode} {name}"
+   ]
+  },
+  {
+   "name": "PlayRandom",
+   "slots": [],
+   "samples": [
+    "shuffle my library",
+    "shuffle my music",
+    "shuffle everything",
+    "shuffle all my music",
+    "play something random",
+    "play random music",
+    "play random songs",
+    "play something",
+    "play anything",
+    "surprise me",
+    "play my library",
+    "play all my music"
+   ]
+  },
+  {
+   "name": "PlayRadio",
+   "slots": [
+    {
+     "name": "name",
+     "type": "MA_NAME"
+    }
+   ],
+   "samples": [
+    "play radio based on {name}",
+    "play a radio based on {name}",
+    "start radio based on {name}",
+    "play music like {name}",
+    "play songs like {name}",
+    "play something like {name}",
+    "start a radio for {name}",
+    "play {name} radio",
+    "start {name} radio"
+   ]
+  },
+  {
+   "name": "Queue",
+   "slots": [
+    {
+     "name": "name",
+     "type": "MA_NAME"
+    },
+    {
+     "name": "song",
+     "type": "MA_SONG"
+    }
+   ],
+   "samples": [
+    "queue {name}",
+    "add {name} to the queue",
+    "add {name} to my queue",
+    "add {name}",
+    "queue the song {song}",
+    "add the song {song}",
+    "add the song {song} to the queue",
+    "queue the album {name}",
+    "add the album {name} to the queue"
+   ]
+  },
+  {
+   "name": "PlayNext",
+   "slots": [
+    {
+     "name": "name",
+     "type": "MA_NAME"
+    },
+    {
+     "name": "song",
+     "type": "MA_SONG"
+    }
+   ],
+   "samples": [
+    "play {name} next",
+    "play the song {song} next",
+    "play the album {name} next",
+    "put {name} next",
+    "queue {name} next"
+   ]
+  },
+  {
+   "name": "WhatsPlaying",
+   "slots": [],
+   "samples": [
+    "what's playing",
+    "what is playing",
+    "what's this",
+    "what is this",
+    "what song is this",
+    "what's this song",
+    "what is this song",
+    "who is this",
+    "who is singing",
+    "who's playing",
+    "what am I listening to",
+    "what's on"
+   ]
+  }
+ ],
+ "builtInIntents": [
+  "AMAZON.ShuffleOnIntent",
+  "AMAZON.ShuffleOffIntent",
+  "AMAZON.LoopOnIntent",
+  "AMAZON.LoopOffIntent",
+  "AMAZON.NextIntent",
+  "AMAZON.PreviousIntent"
+ ],
+ "extraSamples": {
+  "PlayAudio": ["play audio", "play audio please"]
+ },
+ "types": [
+  {
+   "name": "MA_MODE",
+   "values": [
+    {
+     "name": {
+      "value": "play",
+      "synonyms": [
+       "start",
+       "put on",
+       "listen to"
+      ]
+     }
+    },
+    {
+     "name": {
+      "value": "shuffle",
+      "synonyms": [
+       "shuffle play",
+       "play shuffled",
+       "mix"
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

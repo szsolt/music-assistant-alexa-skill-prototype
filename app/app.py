@@ -115,6 +115,13 @@ skill_adapter = SkillAdapter(
     skill_id=sb.skill_id,
     app=app)
 
+# Voice commands: keep the slot types from MA's library names up to date.
+try:
+    from skill import voice_lists
+    voice_lists.start()
+except Exception:
+    app.logger.exception('Could not start the voice names job')
+
 # Mount the Music Assistant API (only ma routes will be mounted at /ma)
 ma_app = ma_api.create_ma_app()
 # Alexa-specific API (mounted at /alexa)

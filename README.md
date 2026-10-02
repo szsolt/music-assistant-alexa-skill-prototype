@@ -88,6 +88,8 @@ Notes:
 | `MA_API_URL` | *No | — | ***REQUIRED** for voice-controlled Next/Previous. Base URL of the Music Assistant WebSocket API (e.g. `https://music.example.com`), used to send `next_track`/`previous_track` commands to the MA player paired with the requesting Echo (see [Device Mapping](#device-mapping) below). |
 | `MA_API_TOKEN` | *No | — | ***REQUIRED** alongside `MA_API_URL` if your MA server enforces auth (schema >= 28). A long-lived token created via MA's own auth flow (`auth/token/create`). Can be provided as a Docker secret the same way as `APP_PASSWORD`. |
 
+| `LWA_CLIENT_ID`, `LWA_CLIENT_SECRET`, `LWA_REFRESH_TOKEN` | No | — | Lets the skill upload the voice-command model (your library's names) to Amazon by itself, once a day when the library changed. See [Voice commands](#voice-commands). Can be Docker secrets like `APP_PASSWORD`. |
+
 **Secrets and persistence**
 
 - The example [docker-compose.yml](docker-compose.yml) demonstrates using Docker secrets for `APP_USERNAME` and `APP_PASSWORD` (files in `./secrets`). When using Docker secrets, the container environment will contain the path to the secret file (for example `/run/secrets/APP_PASSWORD`) and the service reads the file content.
@@ -97,6 +99,18 @@ Notes:
 
 - `SKILL_HOSTNAME` must refer to a public HTTPS endpoint reachable by Amazon; it is embedded in the skill manifest and used for endpoint validation.
 - If you override `PORT` or `DEBUG_PORT`, update the `ports` mapping in [docker-compose.yml](docker-compose.yml) accordingly (host:container).
+
+### Voice commands
+
+"Alexa, ask music assistant to play the album Abbey Road" and similar phrases need your library's names in the skill's model at Amazon. The skill reads them from MA once a day.
+
+To upload them automatically:
+
+1. In the [Amazon developer console](https://developer.amazon.com/loginwithamazon/console/site/lwa/overview.html), create a Login with Amazon security profile. Note its client id and secret.
+2. Get a refresh token for it with the skill management scopes, for example with the ASK CLI on any computer: `ask util generate-lwa-tokens --client-id <id> --client-confirmation <secret> --scopes "alexa::ask:skills:readwrite alexa::ask:models:readwrite"`.
+3. Set `LWA_CLIENT_ID`, `LWA_CLIENT_SECRET` and `LWA_REFRESH_TOKEN` and restart the skill.
+
+Without them, the status page links the model for each language. Paste it into the developer console's JSON editor (Build > Interaction Model > JSON Editor) and build. Check the invocation name before you save.
 
 ## Basic Troubleshooting
 ### Status Page
