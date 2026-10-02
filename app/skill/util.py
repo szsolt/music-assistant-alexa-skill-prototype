@@ -301,12 +301,17 @@ def clear(response_builder):
     return response_builder.response
 
 
-def update_apl_metadata(response_builder, info=None):
+def update_apl_metadata(response_builder, info=None, shown=None):
     """Update the APL document with the latest metadata without interrupting playback.
 
     This function sends ExecuteCommands directives to update only the text and image
     components, avoiding a full document re-render that would restart audio playback.
     This is called in response to UserEvent requests from the APL document.
+    
+    shown: the page's images ({"cover", "background", "next"}), kept by the
+    caller. Images the page already shows aren't set again: setting the
+    background rebuilds it, and the screen flashes. "next" is the image the
+    page switches to by itself when the track ends.
     """
     if not apl_enabled():
         return
@@ -324,6 +329,15 @@ def update_apl_metadata(response_builder, info=None):
         if hostname:
             cover_image = replace_ip_in_url(cover_image, hostname)
             background_image = replace_ip_in_url(background_image, hostname)
+        if shown is not None:
+            on_page = {shown.get("cover"), shown.get("next")}
+            new_cover, new_background = cover_image, background_image
+            if cover_image in on_page:
+                cover_image = ""
+            if background_image in on_page | {shown.get("background")}:
+                background_image = ""
+            shown.update(cover=new_cover or shown.get("cover"),
+                         background=new_background or shown.get("background"), next=None)
 
         # Build SetValue commands to update individual components
         commands = []

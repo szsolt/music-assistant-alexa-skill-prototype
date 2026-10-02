@@ -907,6 +907,8 @@ _SKILL_NAME = "Music Assistant"
 # and where MA paused (its elapsed time on the paused page). Where the
 # stream of our last resume starts: (ms into the track, valid until).
 _STREAM_START_TTL_SECONDS = 60
+# page key -> the images on the page (util.update_apl_metadata)
+_page_images = {}
 _paused_at = {}
 _ma_paused_at = {}
 _stream_start = {}
@@ -1022,9 +1024,17 @@ def _track_time_commands(handler_input, arguments, page_key, info):
                 player_id, duration_ms, elapsed_ms, paused, offset, last,
                 upcoming and (upcoming["duration_ms"], bool(upcoming["image"])))
     shown = (position_ms or 0) - offset if paused and offset is not None else None
+    upcoming = _with_ma_hostname(upcoming)
+    _images_on(page_key)["next"] = (upcoming or {}).get("image") or None
     return track_time.set_track_time_commands(offset, duration_ms, shown,
-                                              _track_changes.queue_end_ms(session_id),
-                                              _with_ma_hostname(upcoming))
+                                              _track_changes.queue_end_ms(session_id), upcoming)
+
+
+def _images_on(page_key):
+    """The images on that page, as util.update_apl_metadata keeps them."""
+    if page_key not in _page_images and len(_page_images) > 100:
+        _page_images.clear()
+    return _page_images.setdefault(page_key, {})
 
 
 def _with_ma_hostname(upcoming):
@@ -1221,7 +1231,7 @@ class APLUserEventHandler(AbstractRequestHandler):
             # Send updated APL document with new metadata
             if changed:
                 try:
-                    util.update_apl_metadata(handler_input.response_builder, info)
+                    util.update_apl_metadata(handler_input.response_builder, info, _images_on(page_key))
                     logger.info("APL metadata update directive added to response")
                 except Exception:
                     logger.exception("Failed to update APL metadata")
@@ -1255,6 +1265,8 @@ class APLUserEventHandler(AbstractRequestHandler):
         logger.info("Open page takes %s from MA", command)
         if command == "stream":
             _track_changes.started(page_key)
+            # a new stream: the page won't switch to the next image by itself
+            _images_on(page_key)["next"] = None
             return ([{"type": "SetValue", "componentId": "AudioPlayerRoot",
                       "property": "videoProgressValue", "value": 0}] + _UNDO_BUTTON_PRESS[1:],
                     [{"type": "PlayMedia", "componentId": "videoPlayer", "source": value,
