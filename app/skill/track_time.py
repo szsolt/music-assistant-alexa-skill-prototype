@@ -180,6 +180,13 @@ class TrackChangeTracker:
             if entry:
                 entry["offset"], entry["duration"], entry["last"] = offset_ms, duration_ms, last
 
+    def set_last(self, session_id, last):
+        """Whether nothing follows the current track now (repeat or shuffle changed)."""
+        with self._lock:
+            entry = self._seen.get(session_id)
+            if entry:
+                entry["last"] = last
+
     def queue_end_ms(self, session_id):
         """Where MA's queue ends in this session's video (ms), or None if not on its last track."""
         with self._lock:
@@ -191,6 +198,23 @@ class TrackChangeTracker:
 
 # Per page (its id), shared by the pages the skill builds (apl.py) and their events.
 pages = TrackChangeTracker()
+
+
+def upcoming_commands(queue_end_ms, upcoming):
+    """APL SetValue commands for what follows the current track: queueEnd and the next track.
+
+    Also on their own, when shuffle or repeat changes what comes next.
+    """
+    commands = [{"type": "SetValue", "componentId": "AudioPlayerRoot",
+                 "property": "queueEnd", "value": int(queue_end_ms or 0)}]
+    upcoming = upcoming or {}
+    for prop, value in (("nextTitle", upcoming.get("title", "")),
+                        ("nextSecondary", upcoming.get("secondary", "")),
+                        ("nextImage", upcoming.get("image", "")),
+                        ("nextDuration", int(upcoming.get("duration_ms") or 0) if upcoming else -1)):
+        commands.append({"type": "SetValue", "componentId": "AudioPlayerRoot",
+                         "property": prop, "value": value})
+    return commands
 
 
 def set_track_time_commands(offset_ms, duration_ms, shown_ms=None, queue_end_ms=None,
@@ -206,20 +230,14 @@ def set_track_time_commands(offset_ms, duration_ms, shown_ms=None, queue_end_ms=
     the page shows by itself at the track's end, before the skill's next
     update arrives; None: nothing to switch to.
     """
-    commands = [{"type": "SetValue", "componentId": "AudioPlayerRoot",
-                 "property": "queueEnd", "value": int(queue_end_ms or 0)}]
+    queue_end, *following = upcoming_commands(queue_end_ms, upcoming)
+    commands = [queue_end]
     if offset_ms is not None:
         commands.append({"type": "SetValue", "componentId": "AudioPlayerRoot",
                          "property": "trackOffset", "value": int(offset_ms)})
     commands.append({"type": "SetValue", "componentId": "AudioPlayerRoot",
                      "property": "trackDuration", "value": int(duration_ms or 0)})
-    upcoming = upcoming or {}
-    for prop, value in (("nextTitle", upcoming.get("title", "")),
-                        ("nextSecondary", upcoming.get("secondary", "")),
-                        ("nextImage", upcoming.get("image", "")),
-                        ("nextDuration", int(upcoming.get("duration_ms") or 0) if upcoming else -1)):
-        commands.append({"type": "SetValue", "componentId": "AudioPlayerRoot",
-                         "property": prop, "value": value})
+    commands += following
     if shown_ms is not None:
         commands.append({"type": "SetValue", "componentId": "slider",
                          "property": "progressValue", "value": max(int(shown_ms), 0)})

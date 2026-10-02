@@ -185,3 +185,23 @@ def test_tracker_page_it_did_not_start_has_no_previous_end():
     t.started("taken-on")                        # a new stream
     t.changed("taken-on", ("u", "Song", ""))
     assert t.previous_end("taken-on") == 0
+
+
+def test_upcoming_commands_after_repeat_or_shuffle():
+    upcoming = {"title": "B", "secondary": "Artist - Album", "image": "https://i/b", "duration_ms": 180_000}
+    values = {c["property"]: c["value"] for c in tt.upcoming_commands(None, upcoming)}
+    assert values == {"queueEnd": 0, "nextTitle": "B", "nextSecondary": "Artist - Album",
+                      "nextImage": "https://i/b", "nextDuration": 180_000}
+    # nothing follows: the page stops at the queue's end, and shows no next song
+    values = {c["property"]: c["value"] for c in tt.upcoming_commands(290_000, None)}
+    assert values["queueEnd"] == 290_000 and values["nextDuration"] == -1
+
+
+def test_tracker_set_last():
+    t = tt.TrackChangeTracker()
+    t.changed("s", ("u", "Song", ""))
+    t.record("s", 10_000, 200_000, last=False)
+    assert t.queue_end_ms("s") is None
+    t.set_last("s", True)   # repeat turned off on the last song
+    assert t.queue_end_ms("s") == 210_000
+    t.set_last("unknown", True)   # no page: nothing to do

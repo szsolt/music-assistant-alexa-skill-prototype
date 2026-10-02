@@ -31,7 +31,9 @@
         "sliderPaddingTop": "@spacingMedium",
         "trackInfoLeftPadding": "@spacingMedium",
         "transportLayoutMargins": "0",
-        "clockFontSize": "44dp"
+        "clockFontSize": "44dp",
+        "upNextImageSize": "56dp",
+        "upNextWidth": "36%"
       },
       "numbers": {
         "primarySongTextMaxLines": 3,
@@ -59,7 +61,9 @@
         "secondaryControlSize": "60dp",
         "sliderIndeterminateHeight": "60dp",
         "sliderPaddingTop": "0",
-        "clockFontSize": "28dp"
+        "clockFontSize": "28dp",
+        "upNextImageSize": "36dp",
+        "upNextWidth": "45%"
       },
       "numbers": {
         "primarySongTextMaxLines": 1,
@@ -288,6 +292,21 @@
               "name": "albumFavorite",
               "type": "number",
               "value": -1
+            },
+            {
+              "name": "shuffleOn",
+              "type": "number",
+              "value": -1
+            },
+            {
+              "name": "repeatMode",
+              "type": "number",
+              "value": -1
+            },
+            {
+              "name": "upNextBright",
+              "type": "boolean",
+              "value": false
             }
           ],
           "handleTick": [
@@ -327,6 +346,49 @@
                   "type": "SetValue",
                   "property": "bellTick",
                   "value": "${bellCount}/${Math.max(0, Math.floor(videoProgressValue))}"
+                }
+              ]
+            },
+            {
+              "description": "Up next fades in for the song's last 20 s. A tick, not a bound opacity: only commands animate. AnimateItem on its own sequencer: tick handlers run in fast mode, which skips it.",
+              "minimumDelay": 250,
+              "when": "${!upNextBright && trackDuration > 0 && trackDuration - (videoProgressValue - trackOffset) <= 20000}",
+              "commands": [
+                {
+                  "type": "SetValue",
+                  "property": "upNextBright",
+                  "value": true
+                },
+                {
+                  "type": "AnimateItem",
+                  "componentId": "Audio_UpNext",
+                  "sequencer": "upNextFade",
+                  "duration": 1500,
+                  "value": [
+                    {
+                      "property": "opacity",
+                      "from": 0.4,
+                      "to": 1
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "description": "Faint again for the next song, or after seeking back.",
+              "minimumDelay": 250,
+              "when": "${upNextBright && !(trackDuration > 0 && trackDuration - (videoProgressValue - trackOffset) <= 20000)}",
+              "commands": [
+                {
+                  "type": "SetValue",
+                  "property": "upNextBright",
+                  "value": false
+                },
+                {
+                  "type": "SetValue",
+                  "componentId": "Audio_UpNext",
+                  "property": "opacity",
+                  "value": 0.4
                 }
               ]
             }
@@ -429,21 +491,70 @@
                       "justifyContent": "${@viewportProfile != @hubRoundSmall ? 'center' : 'end'}",
                       "items": [
                         {
-                          "type": "Container",
-                          "height": "@assetHeight",
-                          "width": "@assetWidth",
-                          "items": [
+                          "type": "TouchWrapper",
+                          "id": "Audio_CoverButton",
+                          "accessibilityLabel": "Play the whole album",
+                          "onPress": [
                             {
-                              "type": "AlexaImage",
-                              "id": "Audio_CoverArt",
-                              "imageSource": "${coverImageSource}",
-                              "imageScale": "best-fill",
-                              "imageWidth": "@assetWidth",
-                              "imageHeight": "@assetHeight",
-                              "imageAspectRatio": "square",
-                              "imageShadow": true
+                              "type": "SetValue",
+                              "componentId": "AudioPlayerRoot",
+                              "property": "bellPress",
+                              "value": "${bellPress + 1}"
+                            },
+                            {
+                              "type": "SetValue",
+                              "componentId": "AudioPlayerRoot",
+                              "property": "bellPressed",
+                              "value": "${bellPress}playalbum"
+                            },
+                            {
+                              "type": "SendEvent",
+                              "arguments": [
+                                "PlayAlbum",
+                                "${bellPress}"
+                              ]
+                            },
+                            {
+                              "type": "ControlMedia",
+                              "componentId": "videoPlayer",
+                              "command": "pause"
+                            },
+                            {
+                              "type": "SetValue",
+                              "componentId": "Busy_Overlay",
+                              "property": "display",
+                              "value": "normal"
+                            },
+                            {
+                              "type": "AnimateItem",
+                              "componentId": "Busy_Overlay",
+                              "duration": 200,
+                              "value": [
+                                {
+                                  "property": "opacity",
+                                  "from": 0,
+                                  "to": 1
+                                }
+                              ]
                             }
-                          ]
+                          ],
+                          "item": {
+                            "type": "Container",
+                            "height": "@assetHeight",
+                            "width": "@assetWidth",
+                            "items": [
+                              {
+                                "type": "AlexaImage",
+                                "id": "Audio_CoverArt",
+                                "imageSource": "${coverImageSource}",
+                                "imageScale": "best-fill",
+                                "imageWidth": "@assetWidth",
+                                "imageHeight": "@assetHeight",
+                                "imageAspectRatio": "square",
+                                "imageShadow": true
+                              }
+                            ]
+                          }
                         }
                       ]
                     },
@@ -492,6 +603,71 @@
                           }
                         }
                       ]
+                    },
+                    {
+                      "description": "Up next: the next song's cover and title, a card of its own above the track bar. Floats over the cover row's bottom right, so it takes no room (the page's middle is centred: a taller one cuts the title). Invisible without a next song.",
+                      "type": "Frame",
+                      "id": "Audio_UpNext",
+                      "when": "${@viewportProfile != @hubRoundSmall && sliderType != 'indeterminate'}",
+                      "display": "${nextDuration >= 0 && nextTitle != '' ? 'normal' : 'invisible'}",
+                      "opacity": 0.4,
+                      "backgroundColor": "rgba(0,0,0,0.55)",
+                      "borderRadius": "12dp",
+                      "paddingLeft": "@spacingXSmall",
+                      "paddingRight": "@spacingSmall",
+                      "paddingTop": "@spacingXSmall",
+                      "paddingBottom": "@spacingXSmall",
+                      "item": {
+                        "type": "Container",
+                        "direction": "row",
+                        "alignItems": "center",
+                        "items": [
+                          {
+                            "type": "Image",
+                            "source": "${nextImage}",
+                            "width": "@upNextImageSize",
+                            "height": "@upNextImageSize",
+                            "scale": "best-fill",
+                            "borderRadius": "6dp"
+                          },
+                          {
+                            "type": "Container",
+                            "direction": "column",
+                            "shrink": 1,
+                            "paddingLeft": "@spacingSmall",
+                            "items": [
+                              {
+                                "type": "Text",
+                                "text": "Up next",
+                                "fontSize": "14dp",
+                                "opacity": 0.7,
+                                "display": "${@viewportProfile == @hubLandscapeSmall ? 'none' : 'normal'}"
+                              },
+                              {
+                                "type": "Text",
+                                "text": "${nextTitle}",
+                                "style": "textStyleBody",
+                                "maxLines": 1
+                              },
+                              {
+                                "type": "Text",
+                                "text": "${nextSecondary}",
+                                "style": "textStyleBody",
+                                "fontSize": "18dp",
+                                "opacity": 0.7,
+                                "maxLines": 1,
+                                "display": "${@viewportProfile == @hubLandscapeSmall ? 'none' : 'normal'}"
+                              }
+                            ],
+                            "grow": 1
+                          }
+                        ],
+                        "width": "100%"
+                      },
+                      "position": "absolute",
+                      "bottom": "@spacingSmall",
+                      "right": "${@marginHorizontal - @spacingMedium}",
+                      "width": "@upNextWidth"
                     }
                   ],
                   "id": "Audio_TrackRow"
@@ -771,6 +947,50 @@
                                   },
                                   {
                                     "type": "TouchWrapper",
+                                    "id": "shuffleButton",
+                                    "accessibilityLabel": "Shuffle",
+                                    "width": "@secondaryControlSize",
+                                    "height": "@secondaryControlSize",
+                                    "display": "${shuffleOn < 0 ? 'invisible' : 'normal'}",
+                                    "onPress": [
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "bellPress",
+                                        "value": "${bellPress + 1}"
+                                      },
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "bellPressed",
+                                        "value": "${bellPress}shuffle${shuffleOn == 1 ? 0 : 1}"
+                                      },
+                                      {
+                                        "type": "SendEvent",
+                                        "arguments": [
+                                          "Shuffle",
+                                          "${bellPress}",
+                                          "${shuffleOn == 1 ? 0 : 1}"
+                                        ]
+                                      },
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "shuffleOn",
+                                        "value": "${shuffleOn == 1 ? 0 : 1}"
+                                      }
+                                    ],
+                                    "item": {
+                                      "type": "VectorGraphic",
+                                      "source": "shuffleIcon",
+                                      "color": "${shuffleOn == 1 ? @colorMusicAssistant : @colorText}",
+                                      "width": "100%",
+                                      "height": "100%",
+                                      "scale": "best-fit"
+                                    }
+                                  },
+                                  {
+                                    "type": "TouchWrapper",
                                     "id": "previousButton",
                                     "accessibilityLabel": "Previous",
                                     "width": "@secondaryControlSize",
@@ -978,6 +1198,68 @@
                                       "width": "100%",
                                       "height": "100%",
                                       "scale": "best-fit"
+                                    }
+                                  },
+                                  {
+                                    "type": "TouchWrapper",
+                                    "id": "repeatButton",
+                                    "accessibilityLabel": "Repeat",
+                                    "width": "@secondaryControlSize",
+                                    "height": "@secondaryControlSize",
+                                    "display": "${repeatMode < 0 ? 'invisible' : 'normal'}",
+                                    "onPress": [
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "bellPress",
+                                        "value": "${bellPress + 1}"
+                                      },
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "bellPressed",
+                                        "value": "${bellPress}repeat${(repeatMode + 1) % 3}"
+                                      },
+                                      {
+                                        "type": "SendEvent",
+                                        "arguments": [
+                                          "Repeat",
+                                          "${bellPress}",
+                                          "${(repeatMode + 1) % 3}"
+                                        ]
+                                      },
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "repeatMode",
+                                        "value": "${(repeatMode + 1) % 3}"
+                                      }
+                                    ],
+                                    "item": {
+                                      "description": "Two icons: a graphic's source may not follow a bind.",
+                                      "type": "Container",
+                                      "width": "100%",
+                                      "height": "100%",
+                                      "items": [
+                                        {
+                                          "type": "VectorGraphic",
+                                          "source": "repeatIcon",
+                                          "color": "${repeatMode > 0 ? @colorMusicAssistant : @colorText}",
+                                          "width": "100%",
+                                          "height": "100%",
+                                          "scale": "best-fit",
+                                          "display": "${repeatMode == 2 ? 'none' : 'normal'}"
+                                        },
+                                        {
+                                          "type": "VectorGraphic",
+                                          "source": "repeatOneIcon",
+                                          "color": "${repeatMode > 0 ? @colorMusicAssistant : @colorText}",
+                                          "width": "100%",
+                                          "height": "100%",
+                                          "scale": "best-fit",
+                                          "display": "${repeatMode == 2 ? 'normal' : 'none'}"
+                                        }
+                                      ]
                                     }
                                   },
                                   {
@@ -1274,6 +1556,84 @@
               "fill": "${accent}",
               "fillOpacity": "${filled ? 1 : 0}",
               "strokeWidth": 4.5
+            }
+          ]
+        }
+      ]
+    },
+    "shuffleIcon": {
+      "type": "AVG",
+      "version": "1.2",
+      "width": 24,
+      "height": 24,
+      "parameters": [
+        {
+          "name": "color",
+          "type": "color",
+          "default": "white"
+        }
+      ],
+      "items": [
+        {
+          "type": "group",
+          "transform": "translate(3,3) scale(0.75)",
+          "items": [
+            {
+              "type": "path",
+              "fill": "${color}",
+              "pathData": "M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"
+            }
+          ]
+        }
+      ]
+    },
+    "repeatIcon": {
+      "type": "AVG",
+      "version": "1.2",
+      "width": 24,
+      "height": 24,
+      "parameters": [
+        {
+          "name": "color",
+          "type": "color",
+          "default": "white"
+        }
+      ],
+      "items": [
+        {
+          "type": "group",
+          "transform": "translate(3,3) scale(0.75)",
+          "items": [
+            {
+              "type": "path",
+              "fill": "${color}",
+              "pathData": "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"
+            }
+          ]
+        }
+      ]
+    },
+    "repeatOneIcon": {
+      "type": "AVG",
+      "version": "1.2",
+      "width": 24,
+      "height": 24,
+      "parameters": [
+        {
+          "name": "color",
+          "type": "color",
+          "default": "white"
+        }
+      ],
+      "items": [
+        {
+          "type": "group",
+          "transform": "translate(3,3) scale(0.75)",
+          "items": [
+            {
+              "type": "path",
+              "fill": "${color}",
+              "pathData": "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z"
             }
           ]
         }

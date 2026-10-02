@@ -561,9 +561,13 @@ class LoopOrShuffleIntentHandler(AbstractRequestHandler):
         def run(player_id):
             if "Shuffle" in name:
                 ma_voice.set_shuffle(player_id, on)
-                return _(data.SHUFFLE_ON_MSG if on else data.SHUFFLE_OFF_MSG)
-            ma_voice.set_repeat(player_id, on)
-            return _(data.REPEAT_ON_MSG if on else data.REPEAT_OFF_MSG)
+                speech = _(data.SHUFFLE_ON_MSG if on else data.SHUFFLE_OFF_MSG)
+            else:
+                ma_voice.set_repeat(player_id, on)
+                speech = _(data.REPEAT_ON_MSG if on else data.REPEAT_OFF_MSG)
+            # The page's buttons and its next song follow.
+            bell.send(_device_id_from(handler_input), ("modes", None))
+            return speech
         return _voice_reply(handler_input, run)
 
 
@@ -949,11 +953,14 @@ class ExceptionEncounteredHandler(AbstractRequestHandler):
 # This section contains handlers related to APL interface
 
 _APL_EVENTS = ("MetadataRefresh", "Next", "Previous", "Pause", "Play", "Seek", "QueueEnded", "Pull",
-               "FavSong", "FavAlbum")
+               "FavSong", "FavAlbum", "Shuffle", "Repeat", "PlayAlbum")
 # Where a button's event carries its press number (bell.pressed).
-_PRESS_NUMBER_AT = {"Next": 1, "Previous": 1, "Play": 2, "Pause": 2, "Seek": 2, "FavSong": 1, "FavAlbum": 1}
+_PRESS_NUMBER_AT = {"Next": 1, "Previous": 1, "Play": 2, "Pause": 2, "Seek": 2, "FavSong": 1, "FavAlbum": 1,
+                    "Shuffle": 1, "Repeat": 1, "PlayAlbum": 1}
 # Favourite buttons: press kind -> what they mark.
 _FAVORITE_PRESSES = {"favsong": "song", "favalbum": "album"}
+# Buttons that set a state; their press carries the state wanted (a number).
+_MODE_PRESSES = ("shuffle", "repeat")
 _UNDO_BUTTON_PRESS = [
     {"type": "ControlMedia", "componentId": "videoPlayer", "command": "play"},
     {"type": "SetValue", "componentId": "Busy_Overlay", "property": "opacity", "value": 0},
@@ -1088,7 +1095,8 @@ def _track_time_commands(handler_input, arguments, page_key, info):
     _images_on(page_key)["next"] = (upcoming or {}).get("image") or None
     return (track_time.set_track_time_commands(offset, duration_ms, shown,
                                                _track_changes.queue_end_ms(session_id), upcoming)
-            + _favorite_commands(_favorites_of(player_id)))
+            + _favorite_commands(_favorites_of(player_id))
+            + _mode_commands(_modes_of(player_id)))
 
 
 def _images_on(page_key):
@@ -1142,6 +1150,11 @@ def _press(device_id, kind, position_ms=None):
     if kind in _FAVORITE_PRESSES:
         _favorite_press(device_id, _FAVORITE_PRESSES[kind], bool(position_ms))
         return True
+    if kind in _MODE_PRESSES:
+        _mode_press(device_id, kind, position_ms or 0)
+        return True
+    if kind == "playalbum":
+        return _play_album_for(device_id)
     if kind == "pause":
         logger.info("APL pause button at %s ms", position_ms)
         _remember(_paused_at, device_id, position_ms)
@@ -1161,9 +1174,9 @@ def _press(device_id, kind, position_ms=None):
 
 def _lan_press(device_id, kind, position_ms):
     """A button press that came over the LAN, through the page's bell (bell.py)."""
-    if kind in _FAVORITE_PRESSES:
+    if kind in _FAVORITE_PRESSES or kind in _MODE_PRESSES:
         _press(device_id, kind, position_ms)
-    elif kind in ("pause", "play", "next", "previous", "seek") and not _press(device_id, kind, position_ms):
+    elif kind in ("pause", "play", "next", "previous", "seek", "playalbum") and not _press(device_id, kind, position_ms):
         bell.undo(device_id)
 
 
@@ -1195,6 +1208,70 @@ def _favorite_press(device_id, kind, on):
         logger.warning("MA didn't change the favourite: %s", e)
     # Also when it failed: the page flipped its heart already.
     bell.send(device_id, ("favorites", _favorites_of(player_id)))
+
+
+def _modes_of(player_id):
+    """MA's shuffle and repeat for player_id's queue, or None if MA can't say."""
+    try:
+        return ma_voice.modes(player_id)
+    except (ma_voice.MAUnavailable, ma_voice.MAFailed) as e:
+        logger.warning("Could not read shuffle and repeat from MA: %s", e)
+        return None
+
+
+def _mode_commands(modes):
+    """SetValue commands for the shuffle and repeat buttons: -1 hidden; shuffle 0/1; repeat 0 off, 1 all, 2 one."""
+    return [{"type": "SetValue", "componentId": "AudioPlayerRoot", "property": "shuffleOn",
+             "value": -1 if modes is None else int(modes["shuffle"])},
+            {"type": "SetValue", "componentId": "AudioPlayerRoot", "property": "repeatMode",
+             "value": -1 if modes is None else ma_voice.REPEAT_MODES.index(modes["repeat"])}]
+
+
+def _modes_handoff_commands(device_id, page_key):
+    """For the page, after shuffle or repeat changed: the buttons, and what now comes next."""
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        return []
+    commands = _mode_commands(_modes_of(player_id))
+    result = ma_control.get_current_track_time(player_id)
+    if result:
+        _, _, _, last, upcoming = result
+        _track_changes.set_last(page_key, last)
+        upcoming = _with_ma_hostname(upcoming)
+        _images_on(page_key)["next"] = (upcoming or {}).get("image") or None
+        commands += track_time.upcoming_commands(_track_changes.queue_end_ms(page_key), upcoming)
+    return commands
+
+
+def _mode_press(device_id, kind, value):
+    """The shuffle or repeat button: set it in MA, then show MA's answer on the page."""
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        return
+    logger.info("APL %s button: %s", kind, value)
+    try:
+        if kind == "shuffle":
+            ma_voice.set_shuffle(player_id, bool(value))
+        else:
+            ma_voice.set_repeat_mode(player_id, ma_voice.REPEAT_MODES[value % len(ma_voice.REPEAT_MODES)])
+    except (ma_voice.MAUnavailable, ma_voice.MAFailed) as e:
+        logger.warning("MA didn't change %s: %s", kind, e)
+    # Also when it failed: the page flipped its button already.
+    bell.send(device_id, ("modes", None))
+
+
+def _play_album_for(device_id):
+    """A tap on the cover: play its whole album. False if MA won't (nothing to play)."""
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        return False
+    try:
+        name = ma_voice.play_playing_album(player_id)
+    except (ma_voice.MAUnavailable, ma_voice.MAFailed) as e:
+        logger.warning("MA didn't play the album: %s", e)
+        return False
+    logger.info("APL cover tap: playing album %s", name)
+    return name is not None
 
 
 def _ma_state_of(device_id, page_id):
@@ -1245,8 +1322,9 @@ class APLUserEventHandler(AbstractRequestHandler):
                 return handler_input.response_builder.set_should_end_session(None).response
             position_ms = (track_time.video_position_ms(arguments, index=1)
                            if kind in ("pause", "play", "seek") else None)
-            if kind in _FAVORITE_PRESSES:
-                # ["FavSong", press number, 1 to mark or 0 to unmark]
+            if kind in _FAVORITE_PRESSES or kind in _MODE_PRESSES:
+                # ["FavSong", press number, 1 to mark or 0 to unmark]; Shuffle 1/0;
+                # Repeat 0 off, 1 all, 2 one
                 position_ms = int(float(arguments[2])) if len(arguments) > 2 else 0
             done = _press(_device_id_from(handler_input), kind, position_ms)
             # A press stops the page's running command sequence, and with it a
@@ -1363,6 +1441,8 @@ class APLUserEventHandler(AbstractRequestHandler):
             return list(_UNDO_BUTTON_PRESS), []
         if command == "favorites":
             return _favorite_commands(value), []
+        if command == "modes":
+            return _modes_handoff_commands(_device_id_from(handler_input), page_key), []
         logger.info("Open page takes %s from MA", command)
         if command == "stream":
             _track_changes.started(page_key)

@@ -197,6 +197,33 @@ def set_repeat(player_id, on):
     _run(_set_mode(player_id, None, on))
 
 
+REPEAT_MODES = ("off", "all", "one")
+
+
+async def _modes(player_id):
+    async with _client() as client:
+        queue = await client.player_queues.get_active_queue(player_id)
+        if queue is None:
+            return None
+        repeat = queue.repeat_mode.value if queue.repeat_mode.value in REPEAT_MODES else "off"
+        return {"shuffle": bool(queue.shuffle_enabled), "repeat": repeat}
+
+
+def modes(player_id):
+    """{"shuffle": bool, "repeat": "off", "all" or "one"} of player_id's queue, or None."""
+    return _run(_modes(player_id))
+
+
+async def _set_repeat_mode(player_id, mode):
+    async with _client() as client:
+        await client.player_queues.repeat(await _queue_id(client, player_id), RepeatMode(mode))
+
+
+def set_repeat_mode(player_id, mode):
+    """Repeat "off", "all" (the queue) or "one" (the song)."""
+    _run(_set_repeat_mode(player_id, mode))
+
+
 async def _now_playing(player_id):
     async with _client() as client:
         queue = await client.player_queues.get_active_queue(player_id)
@@ -277,3 +304,20 @@ def set_favorite(player_id, kind, on=None):
     Returns (its name, favourite now), or None if nothing of that kind plays.
     """
     return _run(_set_favorite(player_id, kind, on))
+
+
+async def _play_playing_album(player_id):
+    async with _client() as client:
+        album = await _playing(client, player_id, "album")
+        if album is None:
+            return None
+        queue_id = await _queue_id(client, player_id)
+        # The whole album, in order.
+        await client.player_queues.shuffle(queue_id, False)
+        await client.player_queues.play_media(queue_id, album.uri, option=QueueOption.REPLACE)
+        return album.name
+
+
+def play_playing_album(player_id):
+    """Play the whole album of the song that plays, from its first song. Its name, or None."""
+    return _run(_play_playing_album(player_id))
