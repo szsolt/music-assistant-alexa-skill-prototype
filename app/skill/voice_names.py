@@ -155,6 +155,11 @@ def build_types(names):
 
 
 def digest(types):
-    """A short hash of the slot types, to upload only when they changed."""
-    raw = json.dumps(types, sort_keys=True, ensure_ascii=False).encode()
+    """A short hash of the slot types, to upload only when they changed.
+
+    Order doesn't count: Amazon doesn't care, and play order changes daily.
+    """
+    rows = sorted((t["name"], json.dumps(v, sort_keys=True, ensure_ascii=False))
+                  for t in types for v in t["values"])
+    raw = json.dumps(rows, ensure_ascii=False).encode()
     return hashlib.sha256(raw).hexdigest()[:16]

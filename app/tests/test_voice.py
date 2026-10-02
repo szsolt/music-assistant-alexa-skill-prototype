@@ -50,6 +50,8 @@ def test_digest_changes_with_names():
     b, _ = voice_names.build_types({"artist": ["B"]})
     assert voice_names.digest(a) == voice_names.digest(voice_names.build_types({"artist": ["A"]})[0])
     assert voice_names.digest(a) != voice_names.digest(b)
+    assert (voice_names.digest(voice_names.build_types({"artist": ["A", "B"]})[0])
+            == voice_names.digest(voice_names.build_types({"artist": ["B", "A"]})[0]))
 
 
 def _c(kind, name, artist=""):
