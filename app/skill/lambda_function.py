@@ -385,8 +385,7 @@ def _next_or_previous_for(device_id, command):
     """Send next/previous to the MA player paired with this Echo.
 
     Returns "ok", "unmapped" (Echo not paired in /devices) or "failed".
-    MA then pushes the new stream and relaunches the skill, as for any
-    track change.
+    MA then pushes the new stream (see _stream_reply).
     """
     player_id = device_mapping.get_player_for_device(device_id)
     if not player_id:
@@ -417,18 +416,16 @@ class NextOrPreviousIntentHandler(AbstractRequestHandler):
         intent_name = handler_input.request_envelope.request.intent.name
         command = "next" if intent_name == "AMAZON.NextIntent" else "previous"
 
-        result = _next_or_previous_to_ma(handler_input, command)
+        result = _stream_reply(handler_input, lambda: _next_or_previous_to_ma(handler_input, command))
+        if not isinstance(result, str):
+            return result
         if result == "unmapped":
             handler_input.response_builder.speak(
                 _(data.DEVICE_NOT_MAPPED_MSG)).set_should_end_session(True)
             return handler_input.response_builder.response
 
-        if result == "failed":
-            handler_input.response_builder.speak(
-                _(data.MA_COMMAND_FAILED_MSG)).set_should_end_session(True)
-            return handler_input.response_builder.response
-
-        handler_input.response_builder.set_should_end_session(True)
+        handler_input.response_builder.speak(
+            _(data.MA_COMMAND_FAILED_MSG)).set_should_end_session(True)
         return handler_input.response_builder.response
 
 
@@ -488,9 +485,11 @@ class ResumeIntentHandler(AbstractRequestHandler):
 
         # Voice "Alexa, resume", or play in MA's UI (which MA's provider
         # speaks as this intent): MA builds a new stream from the paused
-        # position and relaunches us; the old URL would start the track over.
-        if _resume_through_ma(handler_input) == "ok":
-            return handler_input.response_builder.set_should_end_session(True).response
+        # position, and this reply plays it; the old URL would start the
+        # track over.
+        result = _stream_reply(handler_input, lambda: _resume_through_ma(handler_input))
+        if not isinstance(result, str):
+            return result
 
         url, _audio = _get_stream_url(request)
         if not url:
@@ -652,9 +651,11 @@ def _play_and_answer(handler_input, started, start, speech):
         raise
     url = _wait_for_stream(device_id, min(_VOICE_WAIT_S, _VOICE_DEADLINE_S - (time.monotonic() - started)))
     if url is None:
-        logger.info("Voice command: no stream from MA in time, MA starts it the spoken way")
+        logger.info("No stream from MA in time, MA starts it the spoken way")
         live_page.closed(device_id, fall_back=True)
-        return handler_input.response_builder.speak(speech).set_should_end_session(True).response
+        if speech:
+            handler_input.response_builder.speak(speech)
+        return handler_input.response_builder.set_should_end_session(True).response
     response = util.play(url=url, offset=0, text=speech,
                          response_builder=handler_input.response_builder,
                          supports_apl=_supports_apl(handler_input), device_id=device_id)
@@ -662,6 +663,30 @@ def _play_and_answer(handler_input, started, start, speech):
         live_page.closed(device_id)
         _watch_page(device_id)
     return response
+
+
+class _NotStarted(Exception):
+    """MA didn't take the command (_stream_reply)."""
+
+
+def _stream_reply(handler_input, send):
+    """Ask MA for a new stream with send(), and answer with it in one reply.
+
+    As for voice commands: an open page plays the new stream instead of
+    being closed and opened again. send() returns "ok", "unmapped" or
+    "failed"; anything but "ok" is returned as is, else the response.
+    """
+    result = []
+
+    def start():
+        result.append(send())
+        if result[-1] != "ok":
+            raise _NotStarted
+
+    try:
+        return _play_and_answer(handler_input, time.monotonic(), start, None)
+    except _NotStarted:
+        return result[-1]
 
 
 class VoicePlayHandler(AbstractRequestHandler):
