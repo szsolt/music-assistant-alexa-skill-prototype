@@ -209,6 +209,65 @@
     "what am I listening to",
     "what's on"
    ]
+  },
+  {
+   "name": "AddFavorite",
+   "slots": [
+    {
+     "name": "what",
+     "type": "MA_FAVORITE_KIND"
+    }
+   ],
+   "samples": [
+    "like this {what}",
+    "I like this {what}",
+    "love this {what}",
+    "I love this {what}",
+    "favourite this {what}",
+    "favorite this {what}",
+    "save this {what}",
+    "mark this {what} as a favourite",
+    "mark this {what} as a favorite",
+    "add this {what} to my favourites",
+    "add this {what} to the favourites",
+    "add this {what} to my favorites",
+    "add this {what} to the favorites",
+    "like this",
+    "I like this",
+    "love this",
+    "I love this",
+    "favourite this",
+    "favorite this",
+    "add this to my favourites",
+    "add this to my favorites"
+   ]
+  },
+  {
+   "name": "RemoveFavorite",
+   "slots": [
+    {
+     "name": "what",
+     "type": "MA_FAVORITE_KIND"
+    }
+   ],
+   "samples": [
+    "unlike this {what}",
+    "I don't like this {what}",
+    "unfavourite this {what}",
+    "unfavorite this {what}",
+    "remove this {what} from my favourites",
+    "remove this {what} from the favourites",
+    "remove this {what} from my favorites",
+    "remove this {what} from the favorites",
+    "take this {what} off my favourites",
+    "take this {what} off my favorites",
+    "unlike this",
+    "I don't like this",
+    "unfavourite this",
+    "unfavorite this",
+    "remove this from my favourites",
+    "remove this from my favorites"
+   ]
   }
  ],
  "builtInIntents": [
@@ -220,7 +279,10 @@
   "AMAZON.PreviousIntent"
  ],
  "extraSamples": {
-  "PlayAudio": ["play audio", "play audio please"]
+  "PlayAudio": [
+   "play audio",
+   "play audio please"
+  ]
  },
  "types": [
   {
@@ -243,6 +305,37 @@
        "shuffle play",
        "play shuffled",
        "mix"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "MA_FAVORITE_KIND",
+   "values": [
+    {
+     "name": {
+      "value": "song",
+      "synonyms": [
+       "track",
+       "tune"
+      ]
+     }
+    },
+    {
+     "name": {
+      "value": "album",
+      "synonyms": [
+       "record"
+      ]
+     }
+    },
+    {
+     "name": {
+      "value": "artist",
+      "synonyms": [
+       "band",
+       "singer"
       ]
      }
     }

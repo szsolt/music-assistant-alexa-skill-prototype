@@ -218,10 +218,15 @@ def _press_arrived(page, number, kind, path, now=None):
 
 def undo(device_id):
     """The skill couldn't do what a LAN press asked: the page undoes it with its next pull."""
+    send(device_id, ("undo", None))
+
+
+def send(device_id, handoff):
+    """Send handoff (command, value) to the device's open page with its next pull."""
     with _lock:
         page_id = _page_of.get(device_id)
     if page_id:
-        _send(page_id, ("undo", None))
+        _send(page_id, handoff)
 
 
 def _send(page_id, handoff):

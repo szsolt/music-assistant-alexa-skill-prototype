@@ -211,3 +211,69 @@ async def _now_playing(player_id):
 def now_playing(player_id):
     """(title, artist) of the current track, or None."""
     return _run(_now_playing(player_id))
+
+
+# ---------- favourites ----------
+
+FAVORITE_KINDS = ("song", "album", "artist")
+
+
+async def _playing(client, player_id, kind):
+    """The song, album or artist of what plays on player_id, or None (e.g. radio)."""
+    queue = await client.player_queues.get_active_queue(player_id)
+    media = queue.current_item.media_item if queue and queue.current_item else None
+    if media is None or media.media_type != MediaType.TRACK:
+        return None
+    if kind == "song":
+        return media
+    if kind == "album":
+        return getattr(media, "album", None)
+    artists = getattr(media, "artists", None) or []
+    return artists[0] if artists else None
+
+
+async def _in_library(client, item, kind):
+    """item as MA's library has it (with its favourite flag), or None."""
+    media_type = _MEDIA_TYPES[kind]
+    if item.provider == "library":
+        return await client.music.get_item(media_type, item.item_id, "library")
+    return await client.music.get_library_item_by_prov_id(media_type, item.item_id, item.provider)
+
+
+async def _favorites(player_id):
+    async with _client() as client:
+        state = {}
+        for kind in ("song", "album"):
+            item = await _playing(client, player_id, kind)
+            library = await _in_library(client, item, kind) if item else None
+            state[kind] = bool(library and library.favorite) if item else None
+        return state
+
+
+def favorites(player_id):
+    """{"song", "album"}: True or False if what plays is a favourite, None if it can't be one."""
+    return _run(_favorites(player_id))
+
+
+async def _set_favorite(player_id, kind, on):
+    async with _client() as client:
+        item = await _playing(client, player_id, kind)
+        if item is None:
+            return None
+        library = await _in_library(client, item, kind)
+        now = bool(library and library.favorite)
+        wanted = not now if on is None else on
+        if wanted and not now:
+            # MA adds an item that isn't in the library yet.
+            await client.music.add_item_to_favorites(item.uri)
+        elif now and not wanted:
+            await client.music.remove_item_from_favorites(_MEDIA_TYPES[kind], library.item_id)
+        return item.name, wanted
+
+
+def set_favorite(player_id, kind, on=None):
+    """Make the playing song, album or artist a favourite (on True), not one (False), or toggle (None).
+
+    Returns (its name, favourite now), or None if nothing of that kind plays.
+    """
+    return _run(_set_favorite(player_id, kind, on))

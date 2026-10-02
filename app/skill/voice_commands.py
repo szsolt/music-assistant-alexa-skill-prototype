@@ -21,6 +21,17 @@ INTENTS = {
 }
 
 
+# intent -> True to mark as a favourite, False to unmark
+FAVORITE_INTENTS = {"AddFavorite": True, "RemoveFavorite": False}
+_FAVORITE_WORDS = {"song": "song", "track": "song", "tune": "song", "album": "album", "record": "album",
+                   "artist": "artist", "band": "artist", "singer": "artist"}
+
+
+def favorite_kind(slots):
+    """What "like this X" means: "song" (also when X is missing), "album" or "artist"."""
+    return _FAVORITE_WORDS.get((slot_text(slots, "what") or "").lower(), "song")
+
+
 def slot_text(slots, name):
     """The library name Alexa matched for slot name, else the words it heard."""
     slot = (slots or {}).get(name)

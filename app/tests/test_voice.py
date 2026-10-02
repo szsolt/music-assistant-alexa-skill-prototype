@@ -90,13 +90,13 @@ def test_merge_keeps_invocation_and_replaces_ours():
     assert "AMAZON.ShuffleOnIntent" in names and "PlayAudio" in names
     # MA's spoken fallback says "ask ... to play audio": that must stay PlayAudio.
     assert "play audio" in next(i for i in language["intents"] if i["name"] == "PlayAudio")["samples"]
-    assert [t["name"] for t in language["types"]] == ["OTHER", "MA_MODE", "MA_ARTIST"]
+    assert [t["name"] for t in language["types"]] == ["OTHER", "MA_MODE", "MA_FAVORITE_KIND", "MA_ARTIST"]
     assert base["interactionModel"]["languageModel"]["intents"][1]["samples"] == ["old"]
 
 
 def test_template_uses_only_known_slot_types():
     template = voice_model.template_for("en-US")
-    known = set(voice_names.SLOT_TYPES.values()) | {voice_names.ANY_TYPE, "MA_MODE"}
+    known = set(voice_names.SLOT_TYPES.values()) | {voice_names.ANY_TYPE} | {t["name"] for t in template["types"]}
     used = {s["type"] for i in template["intents"] for s in i["slots"]}
     assert used <= known
     for intent in template["intents"]:
@@ -182,3 +182,10 @@ def test_closest_library_name_by_sound():
     assert voice_match.closest("x", []) is None
     assert voice_match.closest("deck", names) == "Deák Bill Gyula"
     assert voice_match.closest("bill evans", names) == "Bill Evans"
+
+
+def test_favorite_kind_from_what_was_said():
+    slots = {"what": NS(value="record", resolutions=None)}
+    assert voice_commands.favorite_kind(slots) == "album"
+    assert voice_commands.favorite_kind({}) == "song"
+    assert voice_commands.FAVORITE_INTENTS == {"AddFavorite": True, "RemoveFavorite": False}

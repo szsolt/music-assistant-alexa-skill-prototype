@@ -603,7 +603,7 @@ def _voice_reply(handler_input, run):
     return _speak(handler_input, speech)
 
 
-def _speak(handler_input, speech):
+def _speak(handler_input, speech, commands=()):
     """A spoken reply that keeps an open player page.
 
     Ending the session closes the page (or leaves it stuck), so with the
@@ -614,8 +614,10 @@ def _speak(handler_input, speech):
     device_id = _device_id_from(handler_input)
     if not (live_page.is_live(device_id) and _supports_apl(handler_input) and util.apl_enabled()):
         return builder.set_should_end_session(True).response
+    commands = list(commands)
     if not bell.has_page(device_id):
-        util.execute_apl_commands(builder, util.apl_refresh_commands())
+        commands += util.apl_refresh_commands()
+    util.execute_apl_commands(builder, commands)
     return builder.set_should_end_session(None).response
 
 
@@ -663,6 +665,36 @@ def _play_and_answer(handler_input, started, start, speech):
         live_page.closed(device_id)
         _watch_page(device_id)
     return response
+
+
+class FavoriteHandler(AbstractRequestHandler):
+    """"Like this song", "remove this album from my favourites"."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        request = handler_input.request_envelope.request
+        return (is_request_type("IntentRequest")(handler_input)
+                and request.intent.name in voice_commands.FAVORITE_INTENTS)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        _ = handler_input.attributes_manager.request_attributes["_"]
+        intent = handler_input.request_envelope.request.intent
+        kind = voice_commands.favorite_kind(intent.slots)
+        on = voice_commands.FAVORITE_INTENTS[intent.name]
+        logger.info("Voice command %s: %s", intent.name, kind)
+        player_id = device_mapping.get_player_for_device(_device_id_from(handler_input))
+        if not player_id:
+            return _speak(handler_input, _(data.DEVICE_NOT_MAPPED_MSG))
+        try:
+            result = ma_voice.set_favorite(player_id, kind, on)
+        except (ma_voice.MAUnavailable, ma_voice.MAFailed) as e:
+            logger.warning("MA didn't change the favourite: %s", e)
+            return _speak(handler_input, _(data.MA_COMMAND_FAILED_MSG))
+        if result is None:
+            return _speak(handler_input, _(data.NOTHING_TO_FAVORITE_MSG))
+        message = data.FAVORITE_ADDED_MSG if on else data.FAVORITE_REMOVED_MSG
+        return _speak(handler_input, _(message).format(result[0]),
+                      _favorite_commands(_favorites_of(player_id)))
 
 
 class _NotStarted(Exception):
@@ -916,9 +948,12 @@ class ExceptionEncounteredHandler(AbstractRequestHandler):
 # ########## APL INTERFACE HANDLERS #################################
 # This section contains handlers related to APL interface
 
-_APL_EVENTS = ("MetadataRefresh", "Next", "Previous", "Pause", "Play", "Seek", "QueueEnded", "Pull")
+_APL_EVENTS = ("MetadataRefresh", "Next", "Previous", "Pause", "Play", "Seek", "QueueEnded", "Pull",
+               "FavSong", "FavAlbum")
 # Where a button's event carries its press number (bell.pressed).
-_PRESS_NUMBER_AT = {"Next": 1, "Previous": 1, "Play": 2, "Pause": 2, "Seek": 2}
+_PRESS_NUMBER_AT = {"Next": 1, "Previous": 1, "Play": 2, "Pause": 2, "Seek": 2, "FavSong": 1, "FavAlbum": 1}
+# Favourite buttons: press kind -> what they mark.
+_FAVORITE_PRESSES = {"favsong": "song", "favalbum": "album"}
 _UNDO_BUTTON_PRESS = [
     {"type": "ControlMedia", "componentId": "videoPlayer", "command": "play"},
     {"type": "SetValue", "componentId": "Busy_Overlay", "property": "opacity", "value": 0},
@@ -1051,8 +1086,9 @@ def _track_time_commands(handler_input, arguments, page_key, info):
     shown = (position_ms or 0) - offset if paused and offset is not None else None
     upcoming = _with_ma_hostname(upcoming)
     _images_on(page_key)["next"] = (upcoming or {}).get("image") or None
-    return track_time.set_track_time_commands(offset, duration_ms, shown,
-                                              _track_changes.queue_end_ms(session_id), upcoming)
+    return (track_time.set_track_time_commands(offset, duration_ms, shown,
+                                               _track_changes.queue_end_ms(session_id), upcoming)
+            + _favorite_commands(_favorites_of(player_id)))
 
 
 def _images_on(page_key):
@@ -1103,6 +1139,9 @@ def _press(device_id, kind, position_ms=None):
     hand-off isn't needed (or, unpatched, MA makes the Echo hear "pause",
     which reopens the page paused).
     """
+    if kind in _FAVORITE_PRESSES:
+        _favorite_press(device_id, _FAVORITE_PRESSES[kind], bool(position_ms))
+        return True
     if kind == "pause":
         logger.info("APL pause button at %s ms", position_ms)
         _remember(_paused_at, device_id, position_ms)
@@ -1122,8 +1161,40 @@ def _press(device_id, kind, position_ms=None):
 
 def _lan_press(device_id, kind, position_ms):
     """A button press that came over the LAN, through the page's bell (bell.py)."""
-    if kind in ("pause", "play", "next", "previous", "seek") and not _press(device_id, kind, position_ms):
+    if kind in _FAVORITE_PRESSES:
+        _press(device_id, kind, position_ms)
+    elif kind in ("pause", "play", "next", "previous", "seek") and not _press(device_id, kind, position_ms):
         bell.undo(device_id)
+
+
+def _favorites_of(player_id):
+    """MA's favourite flags for what plays ({"song", "album"}), or {} if MA can't say."""
+    try:
+        return ma_voice.favorites(player_id)
+    except (ma_voice.MAUnavailable, ma_voice.MAFailed) as e:
+        logger.warning("Could not read favourites from MA: %s", e)
+        return {}
+
+
+def _favorite_commands(state):
+    """SetValue commands for the page's hearts: 1 a favourite, 0 not, -1 hidden (can't be one)."""
+    return [{"type": "SetValue", "componentId": "AudioPlayerRoot", "property": f"{kind}Favorite",
+             "value": -1 if state[kind] is None else int(state[kind])}
+            for kind in ("song", "album") if kind in state]
+
+
+def _favorite_press(device_id, kind, on):
+    """A heart on the page: mark or unmark what plays, then show MA's answer on the page."""
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        return
+    logger.info("APL %s favourite button: %s", kind, "on" if on else "off")
+    try:
+        ma_voice.set_favorite(player_id, kind, on)
+    except (ma_voice.MAUnavailable, ma_voice.MAFailed) as e:
+        logger.warning("MA didn't change the favourite: %s", e)
+    # Also when it failed: the page flipped its heart already.
+    bell.send(device_id, ("favorites", _favorites_of(player_id)))
 
 
 def _ma_state_of(device_id, page_id):
@@ -1174,6 +1245,9 @@ class APLUserEventHandler(AbstractRequestHandler):
                 return handler_input.response_builder.set_should_end_session(None).response
             position_ms = (track_time.video_position_ms(arguments, index=1)
                            if kind in ("pause", "play", "seek") else None)
+            if kind in _FAVORITE_PRESSES:
+                # ["FavSong", press number, 1 to mark or 0 to unmark]
+                position_ms = int(float(arguments[2])) if len(arguments) > 2 else 0
             done = _press(_device_id_from(handler_input), kind, position_ms)
             # A press stops the page's running command sequence, and with it a
             # refresh chain: restart it (a page with a doorbell has no chain).
@@ -1287,6 +1361,8 @@ class APLUserEventHandler(AbstractRequestHandler):
             # The skill couldn't do what a press over the LAN asked (bell.py).
             logger.info("Page undoes its button press")
             return list(_UNDO_BUTTON_PRESS), []
+        if command == "favorites":
+            return _favorite_commands(value), []
         logger.info("Open page takes %s from MA", command)
         if command == "stream":
             _track_changes.started(page_key)
@@ -1540,6 +1616,7 @@ sb.add_request_handler(PauseCommandHandler())
 sb.add_request_handler(ResumeIntentHandler())
 sb.add_request_handler(StartOverIntentHandler())
 sb.add_request_handler(VoicePlayHandler())
+sb.add_request_handler(FavoriteHandler())
 sb.add_request_handler(PlayRandomHandler())
 sb.add_request_handler(WhatsPlayingHandler())
 sb.add_request_handler(LoopOrShuffleIntentHandler())
