@@ -106,6 +106,14 @@ def base_url():
     return os.environ.get("APL_BELL_URL", "").strip()
 
 
+LOGO_PATH = os.path.join(os.path.dirname(__file__), "ma_logo.png")
+
+
+def logo_url():
+    """Music Assistant's logo for the page header, served next to the bell, or '' without a bell."""
+    return base_url() + "logo.png" if base_url() else ""
+
+
 def new_page(device_id):
     """The id for a page about to be sent to device_id, or '' for a page without a bell."""
     if not base_url() or not device_id:

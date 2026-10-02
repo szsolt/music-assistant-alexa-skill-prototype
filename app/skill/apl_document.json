@@ -15,7 +15,8 @@
     {
       "description": "Default resource definitions for Audio template",
       "colors": {
-        "colorText": "@colorText"
+        "colorText": "@colorText",
+        "colorMusicAssistant": "#18BCF2"
       },
       "dimensions": {
         "assetHeight": "425dp",
@@ -29,7 +30,8 @@
         "sliderIndeterminateHeight": "80dp",
         "sliderPaddingTop": "@spacingMedium",
         "trackInfoLeftPadding": "@spacingMedium",
-        "transportLayoutMargins": "0"
+        "transportLayoutMargins": "0",
+        "clockFontSize": "44dp"
       },
       "numbers": {
         "primarySongTextMaxLines": 3,
@@ -56,7 +58,8 @@
         "primaryControlSize": "80dp",
         "secondaryControlSize": "60dp",
         "sliderIndeterminateHeight": "60dp",
-        "sliderPaddingTop": "0"
+        "sliderPaddingTop": "0",
+        "clockFontSize": "28dp"
       },
       "numbers": {
         "primarySongTextMaxLines": 1,
@@ -360,7 +363,9 @@
             {
               "type": "AlexaBackground",
               "id": "AlexaBackground",
-              "description": "Main backgroud",
+              "description": "Main background: the cover, blurred and faint over black, so the page stays dark.",
+              "opacity": 0.15,
+              "backgroundBlur": true,
               "backgroundImageSource": "${backgroundImageSource}"
             },
             {
@@ -368,8 +373,35 @@
               "id": "AlexaHeader",
               "width": "100%",
               "headerTitle": "${headerTitle}",
-              "headerSubtitle": "${headerSubtitle}",
-              "headerAttributionImage": "${headerAttributionImage}"
+              "headerSubtitle": "${headerSubtitle}"
+            },
+            {
+              "description": "Music Assistant's logo, top right. Our own Image: the header doesn't show its attribution image here.",
+              "type": "Image",
+              "id": "Audio_Logo",
+              "opacity": 0.3,
+              "when": "${headerAttributionImage != ''}",
+              "source": "${headerAttributionImage}",
+              "position": "absolute",
+              "top": "@spacingSmall",
+              "right": "@marginHorizontal",
+              "width": "36dp",
+              "height": "36dp",
+              "scale": "best-fit"
+            },
+            {
+              "description": "A clock, top left: the Show's own local time, so it ticks without the skill. Not on small round screens.",
+              "type": "Text",
+              "id": "Audio_Clock",
+              "when": "${@viewportProfile != @hubRoundSmall}",
+              "text": "${Time.format('H:mm', localTime)}",
+              "position": "absolute",
+              "top": "@spacingSmall",
+              "left": "@marginHorizontal",
+              "fontSize": "@clockFontSize",
+              "fontWeight": "300",
+              "color": "@colorText",
+              "opacity": 0.8
             },
             {
               "type": "Container",
@@ -422,13 +454,13 @@
                       "direction": "column",
                       "shrink": 1,
                       "alignItems": "${@viewportProfile != @hubRoundSmall ? 'start' : 'bottom'}",
-                      "justifyContent": "end",
+                      "justifyContent": "${@viewportProfile != @hubRoundSmall ? 'start' : 'end'}",
                       "items": [
                         {
                           "description": "Dark panel behind title and artist, readable on any background.",
                           "type": "Frame",
                           "id": "Audio_TextPanel",
-                          "backgroundColor": "rgba(0,0,0,0.3)",
+                          "backgroundColor": "rgba(0,0,0,0.55)",
                           "borderRadius": "16dp",
                           "paddingLeft": "@spacingSmall",
                           "paddingRight": "@spacingSmall",
@@ -594,399 +626,412 @@
                       ]
                     },
                     {
-                      "description": "Determinate Slider Container",
+                      "description": "Dark panel behind the track bar, times and buttons, readable on any background.",
                       "when": "${sliderType != 'indeterminate'}",
-                      "type": "Container",
+                      "type": "Frame",
+                      "id": "Audio_ControlsPanel",
                       "width": "100%",
-                      "paddingTop": "@sliderPaddingTop",
-                      "items": [
-                        {
-                          "type": "Container",
-                          "width": "100%",
-                          "alignItems": "center",
-                          "item": [
-                            {
-                              "type": "AlexaSlider",
-                              "id": "slider",
-                              "progressValue": "${videoProgressValue - trackOffset}",
-                              "totalValue": "${trackDuration}",
-                              "positionPropertyName": "sliderThumbPosition",
-                              "onDownCommand": [
-                                {
-                                  "type": "SetValue",
-                                  "componentId": "AudioPlayerRoot",
-                                  "property": "seeking",
-                                  "value": true
-                                }
-                              ],
-                              "onUpCommand": [
-                                {
-                                  "type": "SetValue",
-                                  "componentId": "AudioPlayerRoot",
-                                  "property": "seeking",
-                                  "value": false
-                                },
-                                {
-                                  "type": "SetValue",
-                                  "componentId": "AudioPlayerRoot",
-                                  "property": "bellPress",
-                                  "value": "${bellPress + 1}"
-                                },
-                                {
-                                  "type": "SetValue",
-                                  "componentId": "AudioPlayerRoot",
-                                  "property": "bellPressed",
-                                  "value": "${bellPress}seek${Math.max(0, Math.floor(sliderThumbPosition))}"
-                                },
-                                {
-                                  "type": "SendEvent",
-                                  "arguments": [
-                                    "Seek",
-                                    "${sliderThumbPosition}",
-                                    "${bellPress}"
-                                  ]
-                                },
-                                {
-                                  "type": "ControlMedia",
-                                  "componentId": "videoPlayer",
-                                  "command": "pause"
-                                },
-                                {
-                                  "type": "SetValue",
-                                  "componentId": "Busy_Overlay",
-                                  "property": "display",
-                                  "value": "normal"
-                                },
-                                {
-                                  "type": "AnimateItem",
-                                  "componentId": "Busy_Overlay",
-                                  "duration": 200,
-                                  "value": [
-                                    {
-                                      "property": "opacity",
-                                      "from": 0,
-                                      "to": 1
-                                    }
-                                  ]
-                                }
-                              ],
-                              "metadataDisplayed": true,
-                              "metadataPosition": "above_right",
-                              "width": "100%",
-                              "theme": "${viewport.theme}"
-                            },
-                            {
-                              "type": "Container",
-                              "direction": "row",
-                              "alignItems": "center",
-                              "justifyContent": "center",
-                              "items": [
-                                {
-                                  "type": "TouchWrapper",
-                                  "id": "albumFavoriteButton",
-                                  "accessibilityLabel": "Favourite album",
-                                  "width": "@secondaryControlSize",
-                                  "height": "@secondaryControlSize",
-                                  "display": "${albumFavorite < 0 ? 'invisible' : 'normal'}",
-                                  "onPress": [
-                                    {
-                                      "type": "SetValue",
-                                      "componentId": "AudioPlayerRoot",
-                                      "property": "bellPress",
-                                      "value": "${bellPress + 1}"
-                                    },
-                                    {
-                                      "type": "SetValue",
-                                      "componentId": "AudioPlayerRoot",
-                                      "property": "bellPressed",
-                                      "value": "${bellPress}favalbum${albumFavorite == 1 ? 0 : 1}"
-                                    },
-                                    {
-                                      "type": "SendEvent",
-                                      "arguments": [
-                                        "FavAlbum",
-                                        "${bellPress}",
-                                        "${albumFavorite == 1 ? 0 : 1}"
-                                      ]
-                                    },
-                                    {
-                                      "type": "SetValue",
-                                      "componentId": "AudioPlayerRoot",
-                                      "property": "albumFavorite",
-                                      "value": "${albumFavorite == 1 ? 0 : 1}"
-                                    }
-                                  ],
-                                  "item": {
-                                    "type": "VectorGraphic",
-                                    "source": "albumFavoriteIcon",
-                                    "color": "@colorText",
-                                    "filled": "${albumFavorite == 1}",
-                                    "width": "100%",
-                                    "height": "100%",
-                                    "scale": "best-fit"
+                      "marginTop": "@sliderPaddingTop",
+                      "backgroundColor": "rgba(0,0,0,0.55)",
+                      "borderRadius": "16dp",
+                      "paddingTop": "@spacingXSmall",
+                      "paddingBottom": "@spacingXSmall",
+                      "item": {
+                        "description": "Determinate Slider Container",
+                        "type": "Container",
+                        "width": "100%",
+                        "items": [
+                          {
+                            "type": "Container",
+                            "width": "100%",
+                            "alignItems": "center",
+                            "item": [
+                              {
+                                "type": "AlexaSlider",
+                                "id": "slider",
+                                "progressValue": "${videoProgressValue - trackOffset}",
+                                "totalValue": "${trackDuration}",
+                                "positionPropertyName": "sliderThumbPosition",
+                                "progressFillColor": "@colorMusicAssistant",
+                                "onDownCommand": [
+                                  {
+                                    "type": "SetValue",
+                                    "componentId": "AudioPlayerRoot",
+                                    "property": "seeking",
+                                    "value": true
                                   }
-                                },
-                                {
-                                  "type": "TouchWrapper",
-                                  "id": "previousButton",
-                                  "accessibilityLabel": "Previous",
-                                  "width": "@secondaryControlSize",
-                                  "height": "@secondaryControlSize",
-                                  "onPress": [
-                                    {
-                                      "type": "SetValue",
-                                      "componentId": "AudioPlayerRoot",
-                                      "property": "bellPress",
-                                      "value": "${bellPress + 1}"
-                                    },
-                                    {
-                                      "type": "SetValue",
-                                      "componentId": "AudioPlayerRoot",
-                                      "property": "bellPressed",
-                                      "value": "${bellPress}previous${Math.max(0, Math.floor(videoProgressValue - trackOffset))}"
-                                    },
-                                    {
-                                      "type": "SendEvent",
-                                      "arguments": [
-                                        "Previous",
-                                        "${bellPress}"
-                                      ]
-                                    },
-                                    {
-                                      "type": "ControlMedia",
-                                      "componentId": "videoPlayer",
-                                      "command": "pause"
-                                    },
-                                    {
-                                      "type": "SetValue",
-                                      "componentId": "Busy_Overlay",
-                                      "property": "display",
-                                      "value": "normal"
-                                    },
-                                    {
-                                      "type": "AnimateItem",
-                                      "componentId": "Busy_Overlay",
-                                      "duration": 200,
-                                      "value": [
-                                        {
-                                          "property": "opacity",
-                                          "from": 0,
-                                          "to": 1
-                                        }
-                                      ]
-                                    }
-                                  ],
-                                  "item": {
-                                    "type": "VectorGraphic",
-                                    "source": "skipPreviousIcon",
-                                    "color": "@colorText",
-                                    "width": "100%",
-                                    "height": "100%",
-                                    "scale": "best-fit"
+                                ],
+                                "onUpCommand": [
+                                  {
+                                    "type": "SetValue",
+                                    "componentId": "AudioPlayerRoot",
+                                    "property": "seeking",
+                                    "value": false
+                                  },
+                                  {
+                                    "type": "SetValue",
+                                    "componentId": "AudioPlayerRoot",
+                                    "property": "bellPress",
+                                    "value": "${bellPress + 1}"
+                                  },
+                                  {
+                                    "type": "SetValue",
+                                    "componentId": "AudioPlayerRoot",
+                                    "property": "bellPressed",
+                                    "value": "${bellPress}seek${Math.max(0, Math.floor(sliderThumbPosition))}"
+                                  },
+                                  {
+                                    "type": "SendEvent",
+                                    "arguments": [
+                                      "Seek",
+                                      "${sliderThumbPosition}",
+                                      "${bellPress}"
+                                    ]
+                                  },
+                                  {
+                                    "type": "ControlMedia",
+                                    "componentId": "videoPlayer",
+                                    "command": "pause"
+                                  },
+                                  {
+                                    "type": "SetValue",
+                                    "componentId": "Busy_Overlay",
+                                    "property": "display",
+                                    "value": "normal"
+                                  },
+                                  {
+                                    "type": "AnimateItem",
+                                    "componentId": "Busy_Overlay",
+                                    "duration": 200,
+                                    "value": [
+                                      {
+                                        "property": "opacity",
+                                        "from": 0,
+                                        "to": 1
+                                      }
+                                    ]
                                   }
-                                },
-                                {
-                                  "type": "TouchWrapper",
-                                  "id": "playPauseButton",
-                                  "accessibilityLabel": "${videoPlaying ? 'Pause' : 'Play'}",
-                                  "width": "@primaryControlSize",
-                                  "height": "@primaryControlSize",
-                                  "description": "Pause asks the skill, whose answer pauses the video and MA (a page that paused itself on the tap has stopped sending events); play goes through MA, which sends a stream from the paused position. The play branch comes first: a pause flips videoPlaying, and a play branch after it would run too.",
-                                  "onPress": [
-                                    {
-                                      "type": "Sequential",
-                                      "when": "${!videoPlaying}",
-                                      "commands": [
-                                        {
-                                          "type": "SetValue",
-                                          "componentId": "AudioPlayerRoot",
-                                          "property": "bellPress",
-                                          "value": "${bellPress + 1}"
-                                        },
-                                        {
-                                          "type": "SetValue",
-                                          "componentId": "AudioPlayerRoot",
-                                          "property": "bellPressed",
-                                          "value": "${bellPress}play${Math.max(0, Math.floor(videoProgressValue - trackOffset))}"
-                                        },
-                                        {
-                                          "type": "SendEvent",
-                                          "arguments": [
-                                            "Play",
-                                            "${videoProgressValue - trackOffset}",
-                                            "${bellPress}"
-                                          ]
-                                        },
-                                        {
-                                          "type": "SetValue",
-                                          "componentId": "Busy_Overlay",
-                                          "property": "display",
-                                          "value": "normal"
-                                        },
-                                        {
-                                          "type": "AnimateItem",
-                                          "componentId": "Busy_Overlay",
-                                          "duration": 200,
-                                          "value": [
-                                            {
-                                              "property": "opacity",
-                                              "from": 0,
-                                              "to": 1
-                                            }
-                                          ]
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "Sequential",
-                                      "when": "${videoPlaying}",
-                                      "commands": [
-                                        {
-                                          "type": "SetValue",
-                                          "componentId": "AudioPlayerRoot",
-                                          "property": "bellPress",
-                                          "value": "${bellPress + 1}"
-                                        },
-                                        {
-                                          "type": "SetValue",
-                                          "componentId": "AudioPlayerRoot",
-                                          "property": "bellPressed",
-                                          "value": "${bellPress}pause${Math.max(0, Math.floor(videoProgressValue - trackOffset))}"
-                                        },
-                                        {
-                                          "type": "SendEvent",
-                                          "arguments": [
-                                            "Pause",
-                                            "${videoProgressValue - trackOffset}",
-                                            "${bellPress}"
-                                          ]
-                                        },
-                                        {
-                                          "type": "ControlMedia",
-                                          "componentId": "videoPlayer",
-                                          "command": "pause"
-                                        }
-                                      ]
+                                ],
+                                "metadataDisplayed": true,
+                                "metadataPosition": "above_right",
+                                "width": "100%",
+                                "theme": "${viewport.theme}"
+                              },
+                              {
+                                "type": "Container",
+                                "direction": "row",
+                                "alignItems": "center",
+                                "justifyContent": "center",
+                                "items": [
+                                  {
+                                    "type": "TouchWrapper",
+                                    "id": "albumFavoriteButton",
+                                    "accessibilityLabel": "Favourite album",
+                                    "width": "@secondaryControlSize",
+                                    "height": "@secondaryControlSize",
+                                    "display": "${albumFavorite < 0 ? 'invisible' : 'normal'}",
+                                    "onPress": [
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "bellPress",
+                                        "value": "${bellPress + 1}"
+                                      },
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "bellPressed",
+                                        "value": "${bellPress}favalbum${albumFavorite == 1 ? 0 : 1}"
+                                      },
+                                      {
+                                        "type": "SendEvent",
+                                        "arguments": [
+                                          "FavAlbum",
+                                          "${bellPress}",
+                                          "${albumFavorite == 1 ? 0 : 1}"
+                                        ]
+                                      },
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "albumFavorite",
+                                        "value": "${albumFavorite == 1 ? 0 : 1}"
+                                      }
+                                    ],
+                                    "item": {
+                                      "type": "VectorGraphic",
+                                      "source": "albumFavoriteIcon",
+                                      "color": "@colorText",
+                                      "accent": "@colorMusicAssistant",
+                                      "filled": "${albumFavorite == 1}",
+                                      "width": "100%",
+                                      "height": "100%",
+                                      "scale": "best-fit"
                                     }
-                                  ],
-                                  "item": {
-                                    "type": "VectorGraphic",
-                                    "source": "${videoPlaying ? 'pauseIcon' : 'playIcon'}",
-                                    "color": "@colorText",
-                                    "width": "100%",
-                                    "height": "100%",
-                                    "scale": "best-fit"
-                                  }
-                                },
-                                {
-                                  "type": "TouchWrapper",
-                                  "id": "nextButton",
-                                  "accessibilityLabel": "Next",
-                                  "width": "@secondaryControlSize",
-                                  "height": "@secondaryControlSize",
-                                  "onPress": [
-                                    {
-                                      "type": "SetValue",
-                                      "componentId": "AudioPlayerRoot",
-                                      "property": "bellPress",
-                                      "value": "${bellPress + 1}"
-                                    },
-                                    {
-                                      "type": "SetValue",
-                                      "componentId": "AudioPlayerRoot",
-                                      "property": "bellPressed",
-                                      "value": "${bellPress}next${Math.max(0, Math.floor(videoProgressValue - trackOffset))}"
-                                    },
-                                    {
-                                      "type": "SendEvent",
-                                      "arguments": [
-                                        "Next",
-                                        "${bellPress}"
-                                      ]
-                                    },
-                                    {
-                                      "type": "ControlMedia",
-                                      "componentId": "videoPlayer",
-                                      "command": "pause"
-                                    },
-                                    {
-                                      "type": "SetValue",
-                                      "componentId": "Busy_Overlay",
-                                      "property": "display",
-                                      "value": "normal"
-                                    },
-                                    {
-                                      "type": "AnimateItem",
-                                      "componentId": "Busy_Overlay",
-                                      "duration": 200,
-                                      "value": [
-                                        {
-                                          "property": "opacity",
-                                          "from": 0,
-                                          "to": 1
-                                        }
-                                      ]
+                                  },
+                                  {
+                                    "type": "TouchWrapper",
+                                    "id": "previousButton",
+                                    "accessibilityLabel": "Previous",
+                                    "width": "@secondaryControlSize",
+                                    "height": "@secondaryControlSize",
+                                    "onPress": [
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "bellPress",
+                                        "value": "${bellPress + 1}"
+                                      },
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "bellPressed",
+                                        "value": "${bellPress}previous${Math.max(0, Math.floor(videoProgressValue - trackOffset))}"
+                                      },
+                                      {
+                                        "type": "SendEvent",
+                                        "arguments": [
+                                          "Previous",
+                                          "${bellPress}"
+                                        ]
+                                      },
+                                      {
+                                        "type": "ControlMedia",
+                                        "componentId": "videoPlayer",
+                                        "command": "pause"
+                                      },
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "Busy_Overlay",
+                                        "property": "display",
+                                        "value": "normal"
+                                      },
+                                      {
+                                        "type": "AnimateItem",
+                                        "componentId": "Busy_Overlay",
+                                        "duration": 200,
+                                        "value": [
+                                          {
+                                            "property": "opacity",
+                                            "from": 0,
+                                            "to": 1
+                                          }
+                                        ]
+                                      }
+                                    ],
+                                    "item": {
+                                      "type": "VectorGraphic",
+                                      "source": "skipPreviousIcon",
+                                      "color": "@colorText",
+                                      "width": "100%",
+                                      "height": "100%",
+                                      "scale": "best-fit"
                                     }
-                                  ],
-                                  "item": {
-                                    "type": "VectorGraphic",
-                                    "source": "skipNextIcon",
-                                    "color": "@colorText",
-                                    "width": "100%",
-                                    "height": "100%",
-                                    "scale": "best-fit"
-                                  }
-                                },
-                                {
-                                  "type": "TouchWrapper",
-                                  "id": "songFavoriteButton",
-                                  "accessibilityLabel": "Favourite song",
-                                  "width": "@secondaryControlSize",
-                                  "height": "@secondaryControlSize",
-                                  "display": "${songFavorite < 0 ? 'invisible' : 'normal'}",
-                                  "onPress": [
-                                    {
-                                      "type": "SetValue",
-                                      "componentId": "AudioPlayerRoot",
-                                      "property": "bellPress",
-                                      "value": "${bellPress + 1}"
-                                    },
-                                    {
-                                      "type": "SetValue",
-                                      "componentId": "AudioPlayerRoot",
-                                      "property": "bellPressed",
-                                      "value": "${bellPress}favsong${songFavorite == 1 ? 0 : 1}"
-                                    },
-                                    {
-                                      "type": "SendEvent",
-                                      "arguments": [
-                                        "FavSong",
-                                        "${bellPress}",
-                                        "${songFavorite == 1 ? 0 : 1}"
-                                      ]
-                                    },
-                                    {
-                                      "type": "SetValue",
-                                      "componentId": "AudioPlayerRoot",
-                                      "property": "songFavorite",
-                                      "value": "${songFavorite == 1 ? 0 : 1}"
+                                  },
+                                  {
+                                    "type": "TouchWrapper",
+                                    "id": "playPauseButton",
+                                    "accessibilityLabel": "${videoPlaying ? 'Pause' : 'Play'}",
+                                    "width": "@secondaryControlSize",
+                                    "height": "@secondaryControlSize",
+                                    "description": "Pause asks the skill, whose answer pauses the video and MA (a page that paused itself on the tap has stopped sending events); play goes through MA, which sends a stream from the paused position. The play branch comes first: a pause flips videoPlaying, and a play branch after it would run too.",
+                                    "onPress": [
+                                      {
+                                        "type": "Sequential",
+                                        "when": "${!videoPlaying}",
+                                        "commands": [
+                                          {
+                                            "type": "SetValue",
+                                            "componentId": "AudioPlayerRoot",
+                                            "property": "bellPress",
+                                            "value": "${bellPress + 1}"
+                                          },
+                                          {
+                                            "type": "SetValue",
+                                            "componentId": "AudioPlayerRoot",
+                                            "property": "bellPressed",
+                                            "value": "${bellPress}play${Math.max(0, Math.floor(videoProgressValue - trackOffset))}"
+                                          },
+                                          {
+                                            "type": "SendEvent",
+                                            "arguments": [
+                                              "Play",
+                                              "${videoProgressValue - trackOffset}",
+                                              "${bellPress}"
+                                            ]
+                                          },
+                                          {
+                                            "type": "SetValue",
+                                            "componentId": "Busy_Overlay",
+                                            "property": "display",
+                                            "value": "normal"
+                                          },
+                                          {
+                                            "type": "AnimateItem",
+                                            "componentId": "Busy_Overlay",
+                                            "duration": 200,
+                                            "value": [
+                                              {
+                                                "property": "opacity",
+                                                "from": 0,
+                                                "to": 1
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "type": "Sequential",
+                                        "when": "${videoPlaying}",
+                                        "commands": [
+                                          {
+                                            "type": "SetValue",
+                                            "componentId": "AudioPlayerRoot",
+                                            "property": "bellPress",
+                                            "value": "${bellPress + 1}"
+                                          },
+                                          {
+                                            "type": "SetValue",
+                                            "componentId": "AudioPlayerRoot",
+                                            "property": "bellPressed",
+                                            "value": "${bellPress}pause${Math.max(0, Math.floor(videoProgressValue - trackOffset))}"
+                                          },
+                                          {
+                                            "type": "SendEvent",
+                                            "arguments": [
+                                              "Pause",
+                                              "${videoProgressValue - trackOffset}",
+                                              "${bellPress}"
+                                            ]
+                                          },
+                                          {
+                                            "type": "ControlMedia",
+                                            "componentId": "videoPlayer",
+                                            "command": "pause"
+                                          }
+                                        ]
+                                      }
+                                    ],
+                                    "item": {
+                                      "type": "VectorGraphic",
+                                      "source": "${videoPlaying ? 'pauseIcon' : 'playIcon'}",
+                                      "color": "@colorMusicAssistant",
+                                      "width": "100%",
+                                      "height": "100%",
+                                      "scale": "best-fit"
                                     }
-                                  ],
-                                  "item": {
-                                    "type": "VectorGraphic",
-                                    "source": "songFavoriteIcon",
-                                    "color": "@colorText",
-                                    "filled": "${songFavorite == 1}",
-                                    "width": "100%",
-                                    "height": "100%",
-                                    "scale": "best-fit"
+                                  },
+                                  {
+                                    "type": "TouchWrapper",
+                                    "id": "nextButton",
+                                    "accessibilityLabel": "Next",
+                                    "width": "@secondaryControlSize",
+                                    "height": "@secondaryControlSize",
+                                    "onPress": [
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "bellPress",
+                                        "value": "${bellPress + 1}"
+                                      },
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "bellPressed",
+                                        "value": "${bellPress}next${Math.max(0, Math.floor(videoProgressValue - trackOffset))}"
+                                      },
+                                      {
+                                        "type": "SendEvent",
+                                        "arguments": [
+                                          "Next",
+                                          "${bellPress}"
+                                        ]
+                                      },
+                                      {
+                                        "type": "ControlMedia",
+                                        "componentId": "videoPlayer",
+                                        "command": "pause"
+                                      },
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "Busy_Overlay",
+                                        "property": "display",
+                                        "value": "normal"
+                                      },
+                                      {
+                                        "type": "AnimateItem",
+                                        "componentId": "Busy_Overlay",
+                                        "duration": 200,
+                                        "value": [
+                                          {
+                                            "property": "opacity",
+                                            "from": 0,
+                                            "to": 1
+                                          }
+                                        ]
+                                      }
+                                    ],
+                                    "item": {
+                                      "type": "VectorGraphic",
+                                      "source": "skipNextIcon",
+                                      "color": "@colorText",
+                                      "width": "100%",
+                                      "height": "100%",
+                                      "scale": "best-fit"
+                                    }
+                                  },
+                                  {
+                                    "type": "TouchWrapper",
+                                    "id": "songFavoriteButton",
+                                    "accessibilityLabel": "Favourite song",
+                                    "width": "@secondaryControlSize",
+                                    "height": "@secondaryControlSize",
+                                    "display": "${songFavorite < 0 ? 'invisible' : 'normal'}",
+                                    "onPress": [
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "bellPress",
+                                        "value": "${bellPress + 1}"
+                                      },
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "bellPressed",
+                                        "value": "${bellPress}favsong${songFavorite == 1 ? 0 : 1}"
+                                      },
+                                      {
+                                        "type": "SendEvent",
+                                        "arguments": [
+                                          "FavSong",
+                                          "${bellPress}",
+                                          "${songFavorite == 1 ? 0 : 1}"
+                                        ]
+                                      },
+                                      {
+                                        "type": "SetValue",
+                                        "componentId": "AudioPlayerRoot",
+                                        "property": "songFavorite",
+                                        "value": "${songFavorite == 1 ? 0 : 1}"
+                                      }
+                                    ],
+                                    "item": {
+                                      "type": "VectorGraphic",
+                                      "source": "songFavoriteIcon",
+                                      "color": "@colorText",
+                                      "accent": "@colorMusicAssistant",
+                                      "filled": "${songFavorite == 1}",
+                                      "width": "100%",
+                                      "height": "100%",
+                                      "scale": "best-fit"
+                                    }
                                   }
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      ]
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
                     },
                     {
                       "description": "Indeterminate Slider Container",
@@ -1164,20 +1209,25 @@
           "name": "filled",
           "type": "boolean",
           "default": false
+        },
+        {
+          "name": "accent",
+          "type": "color",
+          "default": "#18BCF2"
         }
       ],
       "items": [
         {
           "type": "group",
-          "transform": "translate(1.2,1.2) scale(0.9)",
+          "transform": "translate(4.2,4.07) scale(0.65)",
           "items": [
             {
               "type": "path",
               "pathData": "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z",
-              "stroke": "${color}",
-              "fill": "${color}",
+              "stroke": "${filled ? accent : color}",
+              "fill": "${accent}",
               "fillOpacity": "${filled ? 1 : 0}",
-              "strokeWidth": 1.6
+              "strokeWidth": 2.4
             }
           ]
         }
@@ -1198,27 +1248,32 @@
           "name": "filled",
           "type": "boolean",
           "default": false
+        },
+        {
+          "name": "accent",
+          "type": "color",
+          "default": "#18BCF2"
         }
       ],
       "items": [
         {
           "type": "path",
-          "pathData": "M2.75 2.75h18.5v18.5H2.75z",
+          "pathData": "M5.5 5.5h13v13H5.5z",
           "stroke": "${color}",
           "strokeWidth": 1.5,
           "fill": "transparent"
         },
         {
           "type": "group",
-          "transform": "translate(6,6.3) scale(0.5)",
+          "transform": "translate(7.8,7.6) scale(0.35)",
           "items": [
             {
               "type": "path",
               "pathData": "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z",
-              "stroke": "${color}",
-              "fill": "${color}",
+              "stroke": "${filled ? accent : color}",
+              "fill": "${accent}",
               "fillOpacity": "${filled ? 1 : 0}",
-              "strokeWidth": 3
+              "strokeWidth": 4.5
             }
           ]
         }

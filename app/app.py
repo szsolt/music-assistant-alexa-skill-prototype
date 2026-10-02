@@ -325,6 +325,15 @@ def bell_image(page, seen, tick, press=None, at=None, playing=None):
     return resp
 
 
+@app.route('/bell/logo.png', methods=['GET'])
+def bell_logo():
+    # Music Assistant's logo in the player page's header (see bell.logo_url).
+    with open(bell.LOGO_PATH, 'rb') as f:
+        resp = Response(f.read(), mimetype='image/png')
+    resp.headers['Cache-Control'] = 'max-age=86400'
+    return resp
+
+
 # Expose OpenAPI spec and Swagger UI from the main app so docs are available
 # at `/openapi.json` and `/docs` (keeps documentation separate from the API
 # implementation which is mounted at `/ma`).

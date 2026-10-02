@@ -108,7 +108,7 @@ def add_apl(response_builder, start_paused=False, device_id=None):
             "audioSources": metadata.get("audioSources", ""),
             "backgroundImageSource": background_image,
             "coverImageSource": cover_image,
-            "headerAttributionImage": metadata.get("headerAttributionImage", ""),
+            "headerAttributionImage": bell.logo_url() or metadata.get("headerAttributionImage", ""),
             "headerTitle": metadata.get("headerTitle", ""),
             "headerSubtitle": metadata.get("headerSubtitle", ""),
             "primaryText": metadata.get("primaryText", ""),
