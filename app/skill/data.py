@@ -41,48 +41,51 @@ info = {
     "secondaryText": ""
 }
 
-def get_latest(api_hostname=None, path='/ma/latest-url', scheme='http', timeout=5, username=None, password=None):
+def info_from(payload):
+    """The page's metadata (as data.info) from a stream MA pushed."""
+    stream_url = payload.get('streamUrl') or ''
+    title = payload.get('title', '') or ''
+    artist = payload.get('artist', '') or ''
+    album = payload.get('album', '') or ''
+    image = payload.get('imageUrl') or ''
+    secondary = ' - '.join(part for part in (artist, album) if part)
+    if stream_url and isinstance(stream_url, str):
+        try:
+            stream_url = re.sub(r'(?i)\.flac(?=$|\?)', '.mp3', stream_url)
+        except Exception:
+            logging.exception('Failed rewriting stream URL extension for %s', stream_url)
+    return {
+        'audioSources': stream_url,
+        'backgroundImageSource': image,
+        'coverImageSource': image,
+        'headerAttributionImage': '',
+        'headerTitle': '',
+        'headerSubtitle': '',
+        'primaryText': title,
+        'secondaryText': secondary
+    }
+
+
+def get_latest(api_hostname=None, path='/ma/latest-url', scheme='http', timeout=5, username=None,
+               password=None, player_id=None):
+    """{'changed': ..., 'info': metadata}; with player_id, that MA player's.
+
+    data.info is set too (the latest of any player), for the status pages.
+    """
     global info
 
     # PRIORITAET 1: Direkt aus shared_store lesen (KEIN CACHE!)
     try:
         import shared_store
-        if shared_store._store and shared_store._store.get('streamUrl'):
-            payload = shared_store._store
-
-            stream_url = payload.get('streamUrl') or ''
-            title = payload.get('title', '') or ''
-            artist = payload.get('artist', '') or ''
-            album = payload.get('album', '') or ''
-            image = payload.get('imageUrl') or ''
-
-            secondary = ''
-            if artist and album:
-                secondary = f"{artist} - {album}"
-            elif artist:
-                secondary = artist
-            elif album:
-                secondary = album
-
-            if stream_url and isinstance(stream_url, str):
-                try:
-                    stream_url = re.sub(r'(?i)\.flac(?=$|\?)', '.mp3', stream_url)
-                except Exception:
-                    logging.exception('Failed rewriting stream URL extension for %s', stream_url)
-
-            info.update({
-                'audioSources': stream_url,
-                'backgroundImageSource': image,
-                'coverImageSource': image,
-                'headerAttributionImage': '',
-                'headerTitle': '',
-                'headerSubtitle': '',
-                'primaryText': title,
-                'secondaryText': secondary
-            })
-
-            logging.info('Loaded from shared_store: %s - %s', title, stream_url[:60])
-            return {'changed': True}
+        payload = shared_store.for_player(player_id)
+        if payload and payload.get('streamUrl'):
+            player_info = info_from(payload)
+            info.update(player_info)
+            logging.info('Loaded from shared_store: %s - %s', player_info['primaryText'],
+                         player_info['audioSources'][:60])
+            return {'changed': True, 'info': player_info}
+        if player_id:
+            return {'changed': False, 'info': dict(info, audioSources='')}
     except Exception as e:
         logging.warning('shared_store read failed: %s', e)
 

@@ -70,7 +70,7 @@ def add_apl(response_builder, start_paused=False, device_id=None):
     from .util import get_ma_hostname, replace_ip_in_url
 
     # Get metadata from shared_store (most reliable) or data.info as fallback
-    metadata = _get_metadata()
+    metadata = _get_metadata(device_id)
     if not metadata:
         logging.warning("No metadata available for APL rendering")
         return
@@ -135,7 +135,7 @@ def add_apl(response_builder, start_paused=False, device_id=None):
     )
 
 
-def _get_metadata():
+def _get_metadata(device_id=None):
     """Get metadata from shared_store or data.info.
 
     shared_store is the primary source (set by MA push-url).
@@ -144,8 +144,9 @@ def _get_metadata():
     # Priority 1: shared_store (most reliable, set by MA)
     try:
         import shared_store
-        if shared_store._store:
-            store = shared_store._store
+        from . import device_mapping
+        store = shared_store.for_player(device_mapping.get_player_for_device(device_id))
+        if store:
             return {
                 "audioSources": store.get("streamUrl", ""),
                 "backgroundImageSource": store.get("imageUrl", ""),

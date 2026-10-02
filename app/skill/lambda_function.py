@@ -727,15 +727,22 @@ _ma_paused_at = {}
 _stream_start = {}
 
 
+def _info_for(device_id):
+    """The metadata of the MA player paired with this Echo (as data.info)."""
+    import shared_store
+    payload = shared_store.for_player(device_mapping.get_player_for_device(device_id))
+    return data.info_from(payload) if payload else data.info
+
+
 def _remember(store, device_id, position_ms):
     if device_id and position_ms is not None:
-        store[device_id] = (track_time.title_key(data.info), position_ms)
+        store[device_id] = (track_time.title_key(_info_for(device_id)), position_ms)
 
 
 def _recall(store, device_id):
     """The position kept in store for this Echo, if it is for the current track."""
     entry = store.get(device_id)
-    if entry and entry[0] == track_time.title_key(data.info):
+    if entry and entry[0] == track_time.title_key(_info_for(device_id)):
         return entry[1]
     return None
 
@@ -795,14 +802,14 @@ def _page_key(handler_input, arguments):
     return _session_id_from(handler_input)
 
 
-def _track_time_commands(handler_input, arguments, page_key):
+def _track_time_commands(handler_input, arguments, page_key, info):
     """SetValue commands for trackOffset/trackDuration, or [] if unneeded.
 
     Only on a track change (or the first refresh of a new page): MA is
     asked once, and the page counts from its own video position after that.
     Kept per page (page_key), so a new page always starts afresh.
     """
-    key = track_time.track_key(data.info)
+    key = track_time.track_key(info)
     if not _track_changes.changed(page_key, key):
         return []
     session_id = page_key
@@ -1009,9 +1016,12 @@ class APLUserEventHandler(AbstractRequestHandler):
 
         # Fetch latest metadata from Music Assistant
         changed = False
+        info = data.info
         try:
-            result = data.get_latest()
+            player_id = device_mapping.get_player_for_device(_device_id_from(handler_input))
+            result = data.get_latest(player_id=player_id)
             changed = bool(result and result.get('changed'))
+            info = (result or {}).get('info', data.info)
             if changed:
                 logger.info("Metadata changed")
             else:
@@ -1020,18 +1030,18 @@ class APLUserEventHandler(AbstractRequestHandler):
             logger.exception("Failed to fetch latest metadata")
 
         # Check if we have valid metadata
-        if not data.info.get('audioSources'):
+        if not info.get('audioSources'):
             logger.warning("No audio sources available for metadata refresh")
         else:
             # Send updated APL document with new metadata
             if changed:
                 try:
-                    util.update_apl_metadata(handler_input.response_builder)
+                    util.update_apl_metadata(handler_input.response_builder, info)
                     logger.info("APL metadata update directive added to response")
                 except Exception:
                     logger.exception("Failed to update APL metadata")
             try:
-                commands += _track_time_commands(handler_input, arguments, page_key)
+                commands += _track_time_commands(handler_input, arguments, page_key, info)
             except Exception:
                 logger.exception("Failed to update APL track time")
 

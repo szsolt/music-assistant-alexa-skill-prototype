@@ -76,7 +76,7 @@ def register_routes(bp):
         stream_url = _rewrite_url(stream_url)
         image_url = _rewrite_url(data.get('imageUrl'))
 
-        shared_store.save({
+        player_id = shared_store.save({
             'streamUrl': stream_url,
             'title': data.get('title'),
             'artist': data.get('artist'),
@@ -88,8 +88,8 @@ def register_routes(bp):
         })
         if not data.get('playerId'):
             # MA's new metadata for its stream (a track change in its flow):
-            # pages with a doorbell pull it.
-            bell.news()
+            # the player's pages with a doorbell pull it.
+            bell.news(device_mapping.get_devices_for_player(player_id) if player_id else None)
         page_live = _offer_to_open_page(data, 'stream', stream_url)
         if not page_live:
             device_mapping.wait_for_pairing(data.get('playerId'))

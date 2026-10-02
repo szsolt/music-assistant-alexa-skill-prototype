@@ -301,7 +301,7 @@ def clear(response_builder):
     return response_builder.response
 
 
-def update_apl_metadata(response_builder):
+def update_apl_metadata(response_builder, info=None):
     """Update the APL document with the latest metadata without interrupting playback.
 
     This function sends ExecuteCommands directives to update only the text and image
@@ -310,6 +310,7 @@ def update_apl_metadata(response_builder):
     """
     if not apl_enabled():
         return
+    info = data.info if info is None else info
     try:
         # Replace MA-hosted image sources if MA_HOSTNAME is set
         try:
@@ -317,8 +318,8 @@ def update_apl_metadata(response_builder):
         except ValueError:
             hostname = ''
 
-        cover_image = data.info.get("coverImageSource", "")
-        background_image = data.info.get("backgroundImageSource", "")
+        cover_image = info.get("coverImageSource", "")
+        background_image = info.get("backgroundImageSource", "")
 
         if hostname:
             cover_image = replace_ip_in_url(cover_image, hostname)
@@ -328,21 +329,21 @@ def update_apl_metadata(response_builder):
         commands = []
 
         # Update primary text (song title)
-        if data.info.get("primaryText"):
+        if info.get("primaryText"):
             commands.append({
                 "type": "SetValue",
                 "componentId": "Audio_PrimaryText",
                 "property": "text",
-                "value": data.info["primaryText"]
+                "value": info["primaryText"]
             })
 
         # Update secondary text (artist/album)
-        if data.info.get("secondaryText"):
+        if info.get("secondaryText"):
             commands.append({
                 "type": "SetValue",
                 "componentId": "Audio_SecondaryText",
                 "property": "text",
-                "value": data.info["secondaryText"]
+                "value": info["secondaryText"]
             })
 
         # Update cover image and bound data so conditional rendering refreshes.
