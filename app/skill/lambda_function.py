@@ -217,7 +217,7 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
         if not url:
             logger.warning("No streamUrl available for Launch/Play request")
             handler_input.response_builder.speak(
-                "Sorry, I could not retrieve the latest music stream from the API. Please check your setup.").set_should_end_session(True)
+                "Music Assistant has nothing to play on this device yet. Start a song for it in Music Assistant.").set_should_end_session(True)
             return handler_input.response_builder.response
 
         logger.info("Playing URL: %s", url)
