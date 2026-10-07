@@ -1284,7 +1284,9 @@ def _ma_state_of(device_id, page_id):
 
 
 bell.set_handlers(press=_lan_press, ma_state=_ma_state_of,
-                  pause_ma=lambda device_id: _sync_device_to_ma(device_id, "pause"))
+                  pause_ma=lambda device_id: _sync_device_to_ma(device_id, "pause"),
+                  peers=lambda device_id: device_mapping.get_devices_for_player(
+                      device_mapping.get_player_for_device(device_id)))
 
 
 class APLUserEventHandler(AbstractRequestHandler):

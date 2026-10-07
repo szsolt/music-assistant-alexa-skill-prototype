@@ -139,3 +139,12 @@ def test_a_claimed_stream_goes_only_to_the_reply():
     assert lp.offer("d", "stream", "url2")
     assert lp.take("d") == ("stream", "url2")           # claim used up
     lp.closed("d")
+
+
+def test_silent_pause_is_taken_once_and_expires():
+    lp._silent_pause.clear()
+    lp.expect_silent_pause("q", now=100)
+    assert lp.takes_silent_pause("q", now=101)
+    assert not lp.takes_silent_pause("q", now=102)
+    lp.expect_silent_pause("q", now=100)
+    assert not lp.takes_silent_pause("q", now=100 + lp.SILENT_PAUSE_SECONDS + 1)

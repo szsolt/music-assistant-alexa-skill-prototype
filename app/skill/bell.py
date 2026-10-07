@@ -32,6 +32,19 @@ Every CHECK_SECONDS the skill compares an open page with MA. If they
 disagree on playing for MISMATCH_CHECKS checks in a row, it pauses the
 one that plays: corrections never start audio. A position far off MA's is
 only logged for now.
+
+Two more cases pause MA. In both the Echo has gone quiet, but MA would
+still show it playing:
+- A page says it plays, but its position hasn't moved for STALL_SECONDS.
+  Its stream has stalled.
+- A page has sent no bell and no pull for GONE_SECONDS. It has closed.
+  The skill forgets it. If it rings again, its pull takes it on, as after
+  a restart. MA's pause goes without speech (see
+  live_page.expect_silent_pause). If MA sent the Echo a new stream since,
+  a new page is on its way. The skill looks again GONE_SECONDS after that
+  stream, and pauses MA if no page came. It also looks again when MA
+  didn't answer, up to UNKNOWN_RETRIES times.
+Neither pauses MA if its player has other Echos: one of them may play it.
 """
 
 import base64
@@ -61,15 +74,32 @@ QUIET_SECONDS = 10     # no check this long after a press, a hand-off or a new p
 MISMATCH_CHECKS = 2    # checks in a row that disagree before the skill corrects
 OFF_MS = 3000          # a position this far from MA's gets logged
 _STARTED_WITHIN = 60   # log how long a stream took to play, if it went out this recently
+# A playing page's position moves with every bell. 20 s rides out a slow
+# start or a rebuffer, and still pauses MA before the user wonders why.
+STALL_SECONDS = 20
+# A page sends a bell every second, and a pull when a bell fails. 30 s of
+# neither means it closed, not that a few requests got lost.
+GONE_SECONDS = 30
+# How often the skill asks MA again about a gone page when MA didn't answer.
+# MA may be down, or the Echo may have no MA player: don't ask for ever.
+UNKNOWN_RETRIES = 2
 
-# Set by the skill (set_handlers): press(device_id, kind, position_ms) acts on
-# a LAN press; ma_state(device_id, page_id) gives (MA state, MA elapsed ms,
-# page track offset ms) or None; pause_ma(device_id) pauses MA.
+# Set by the skill (set_handlers):
+# - press(device_id, kind, position_ms) acts on a LAN press.
+# - ma_state(device_id, page_id) gives (MA state, MA elapsed ms, page track
+#   offset ms), or None.
+# - pause_ma(device_id) pauses MA.
+# - peers(device_id) gives the Echos of device_id's MA player.
 _handlers = {}
 
 _lock = threading.Lock()
 _pages = {}     # page id -> _Page
 _page_of = {}   # device_id -> the id of its latest page
+_stream_sent = {}   # device_id -> when MA last sent it a new stream for a new page
+# device_id -> (since, tries): an Echo without a page, to look at again
+# GONE_SECONDS after since. tries counts MA's unknown answers.
+_recheck = {}
+_sweeping = False
 
 
 class _Page:
@@ -87,6 +117,10 @@ class _Page:
         self.playing = None      # from the last bell
         self.stream_at = now     # when its latest stream went out (a new page has one)
         self.off_logged_at = 0
+        self.rang_at = now       # its last bell or pull (a new page counts from when it went out)
+        self.at = None           # its position in the last bell
+        self.moved_at = now      # when it last moved, was paused or got a stream
+        self.stall_logged = False   # a stall left alone (see _shares_player) was logged
         # A page taken on after a restart: its first bell's press is old,
         # handled before the restart. Presses up to old_press aren't acted on over the LAN.
         self.taken_on = False
@@ -161,6 +195,11 @@ def rang(page_id, seen, press=None, at=None, playing=None, now=None):
                     started_after = now - page.stream_at
                     page.stream_at = None
             page.playing = playing
+        page.rang_at = now
+        if at is not None:
+            if not playing or at != page.at:
+                page.moved_at = now
+            page.at = at
         check = (playing is not None and at is not None and "ma_state" in _handlers
                  and now >= page.next_check and now >= page.quiet_until)
         if check:
@@ -264,7 +303,13 @@ def _check(page_id, at, playing, now=None):
     with _lock:
         if _pages.get(page_id) is not page or now < page.quiet_until:
             return   # something happened during the query
-        if playing == (ma_state == "playing"):
+        stalled = (playing and ma_state == "playing"
+                   and now - page.moved_at >= STALL_SECONDS)
+        if stalled:
+            page.mismatches = 0
+            page.quiet_until = now + QUIET_SECONDS
+            page.moved_at = now
+        elif playing == (ma_state == "playing"):
             page.mismatches = 0
         else:
             page.mismatches += 1
@@ -279,6 +324,16 @@ def _check(page_id, at, playing, now=None):
             if abs(diff) > OFF_MS:
                 page.off_logged_at = now
                 off = diff
+    if stalled:
+        if not _shares_player(device_id):
+            logger.warning("Page on %s stalled at %d ms while MA plays: pausing MA",
+                           device_id[-8:], at)
+            _handlers["pause_ma"](device_id)
+        elif not page.stall_logged:
+            page.stall_logged = True
+            logger.info("Page on %s stalled at %d ms; MA's player has other Echos: leaving MA",
+                        device_id[-8:], at)
+        return
     if off is not None:
         logger.warning("Page on %s is %d ms %s MA", device_id[-8:], abs(off),
                        "ahead of" if off > 0 else "behind")
@@ -288,6 +343,99 @@ def _check(page_id, at, playing, now=None):
     elif fix == "ma":
         logger.warning("Page on %s is paused while MA plays: pausing MA", device_id[-8:])
         _handlers["pause_ma"](device_id)
+
+
+def stream_sent(device_ids, now=None):
+    """MA sent these Echos a new stream that no open page took: a new page is on its way."""
+    now = time.monotonic() if now is None else now
+    with _lock:
+        for device_id in device_ids:
+            _stream_sent[device_id] = now
+
+
+def sweep(now=None):
+    """Forget the pages that stopped ringing. Pause MA where it still plays to one.
+
+    See the module docstring.
+    """
+    now = time.monotonic() if now is None else now
+    with _lock:
+        gone = [(page.device_id, page_id, page.rang_at, 0) for page_id, page in _pages.items()
+                if now - page.rang_at >= GONE_SECONDS]
+        for device_id, page_id, _, _ in gone:
+            del _pages[page_id]
+            if _page_of.get(device_id) == page_id:
+                del _page_of[device_id]
+        due = [(device_id, None, since, tries) for device_id, (since, tries) in _recheck.items()
+               if now - since >= GONE_SECONDS]
+        for device_id, _, _, _ in due:
+            del _recheck[device_id]
+    for device_id, page_id, since, tries in gone + due:
+        _pause_if_playing(device_id, page_id, since, tries, now)
+
+
+def _shares_player(device_id):
+    """True if device_id's MA player has other Echos too.
+
+    One of them may play MA: an Echo without a screen has no page that
+    shows it. Pausing MA would stop it.
+    """
+    return any(d != device_id for d in _handlers["peers"](device_id)) if "peers" in _handlers else False
+
+
+def _pause_if_playing(device_id, page_id, since, tries, now):
+    """device_id has had no page from since on. Pause MA if it still plays to it.
+
+    tries: how often MA's state was unknown for it so far.
+    """
+    state = _handlers["ma_state"](device_id, page_id) if "ma_state" in _handlers else None
+    if state is None:
+        if tries < UNKNOWN_RETRIES:
+            logger.info("Page on %s is gone; MA's state is unknown: looking again in %d s",
+                        device_id[-8:], GONE_SECONDS)
+            with _lock:
+                if device_id not in _page_of:
+                    _recheck.setdefault(device_id, (now, tries + 1))
+        else:
+            logger.warning("Page on %s is gone; MA's state is still unknown: leaving MA",
+                           device_id[-8:])
+        return
+    with _lock:
+        # Checked after the query: MA may have started something new meanwhile.
+        has_page = device_id in _page_of
+        sent = _stream_sent.get(device_id, since)
+        if state[0] == "playing" and not has_page and sent > since:
+            # Its new page should come by GONE_SECONDS after the stream.
+            _recheck[device_id] = (sent, 0)
+            logger.info("Page on %s is gone; MA sent a new stream: waiting for its page",
+                        device_id[-8:])
+            return
+    if state[0] != "playing" or has_page or live_page.is_live(device_id, now):
+        logger.info("Page on %s is gone; MA isn't playing to it", device_id[-8:])
+    elif _shares_player(device_id):
+        logger.info("Page on %s is gone; MA's player has other Echos: leaving MA", device_id[-8:])
+    else:
+        logger.warning("Page on %s is gone while MA plays: pausing MA", device_id[-8:])
+        live_page.expect_silent_pause(device_id, now)
+        _handlers["pause_ma"](device_id)
+
+
+def start_sweeping():
+    """Sweep every CHECK_SECONDS, in the background. Once: later calls do nothing."""
+    global _sweeping
+    with _lock:
+        if _sweeping:
+            return
+        _sweeping = True
+
+    def loop():
+        while True:
+            time.sleep(CHECK_SECONDS)
+            try:
+                sweep()
+            except Exception:
+                logger.exception("Bell sweep failed")
+    threading.Thread(target=loop, name="bell-sweep", daemon=True).start()
 
 
 def news(device_ids=None):
@@ -324,6 +472,7 @@ def pull(page_id, device_id, seen, now=None):
             logger.info("Taking on bell page %s of %s", page_id, device_id[-8:])
         if page.device_id != device_id:
             return None
+        page.rang_at = now   # a pull through Amazon shows the page is open too
         _confirm(page, seen)
         if seen >= page.state:
             return None
@@ -362,6 +511,7 @@ def _add_pending(page, state, now, handed, handoffs):
             page.pending.clear()
             handoffs = []
             page.stream_at = now
+            page.moved_at = now
         if handed[0] != "resume":
             # A resume is done by the skill (MA sends a stream), not by the page.
             page.pending.append([state, now, handed])

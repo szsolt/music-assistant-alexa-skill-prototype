@@ -24,6 +24,10 @@ LIVE_SECONDS = 6
 # How long a hand-off waits for the page's next refresh.
 HANDOFF_SECONDS = 6
 COMMANDS = ("stream", "pause", "resume")
+# How long the mark set by expect_silent_pause lasts. MA's pause comes back
+# through /control within a second or two. 10 s leaves room for a slow MA,
+# without silencing a later pause asked for by the user.
+SILENT_PAUSE_SECONDS = 10
 
 _lock = threading.Lock()
 _last_event = {}   # device_id -> monotonic time of the page's last event
@@ -32,6 +36,7 @@ _claimed = set()
 # device_id -> hand-offs in the order the page takes them, each
 # [command, value, on_missed, Timer]: at most a stream and a pause after it.
 _handoff = {}
+_silent_pause = {}   # device_id -> until when MA's next pause needs no speech
 
 
 def heard_from(device_id, now=None):
@@ -64,6 +69,26 @@ def claim(device_id):
     if device_id:
         with _lock:
             _claimed.add(device_id)
+
+
+def expect_silent_pause(device_id, now=None):
+    """The skill is about to pause MA for a device whose page has closed.
+
+    MA's pause then needs no spoken "pause". The Echo plays nothing of
+    MA's, and a spoken pause would stop whatever else it plays. This only
+    works when MA can leave its speech out (canSkipSpeech).
+    """
+    now = time.monotonic() if now is None else now
+    with _lock:
+        _silent_pause[device_id] = now + SILENT_PAUSE_SECONDS
+
+
+def takes_silent_pause(device_id, now=None):
+    """True, once, if MA's pause for the device needs no speech (see expect_silent_pause)."""
+    now = time.monotonic() if now is None else now
+    with _lock:
+        until = _silent_pause.pop(device_id, None)
+    return until is not None and now <= until
 
 
 def is_live(device_id, now=None):

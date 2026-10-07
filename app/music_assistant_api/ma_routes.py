@@ -65,6 +65,19 @@ def _offer_to_open_page(data, command, value=None):
     return False
 
 
+def _silent_pause(data):
+    """True if MA's pause is one the skill asked for after the page closed (see
+    live_page.expect_silent_pause), so MA needn't speak."""
+    player_id = data.get('playerId')
+    if not data.get('canSkipSpeech') or not player_id:
+        return False
+    for device_id in device_mapping.get_devices_for_player(player_id):
+        if live_page.takes_silent_pause(device_id):
+            logger.info("Pause for %s needs no speech: its page has closed", player_id)
+            return True
+    return False
+
+
 def register_routes(bp):
     @bp.route('/push-url', methods=['POST'])
     def push_url():
@@ -91,6 +104,8 @@ def register_routes(bp):
             # the player's pages with a doorbell pull it.
             bell.news(device_mapping.get_devices_for_player(player_id) if player_id else None)
         page_live = _offer_to_open_page(data, 'stream', stream_url)
+        if data.get('playerId') and not page_live:
+            bell.stream_sent(device_mapping.get_devices_for_player(player_id))
         if not page_live:
             device_mapping.wait_for_pairing(data.get('playerId'))
         return jsonify({'status': 'ok', 'version': shared_store._version, 'pageLive': page_live})
@@ -102,7 +117,9 @@ def register_routes(bp):
         command = data.get('command')
         if command not in ('pause', 'resume'):
             return jsonify({'error': 'Unsupported command'}), 400
-        return jsonify({'status': 'ok', 'pageLive': _offer_to_open_page(data, command)})
+        page_live = (_offer_to_open_page(data, command)
+                     or (command == 'pause' and _silent_pause(data)))
+        return jsonify({'status': 'ok', 'pageLive': page_live})
 
     @bp.route('/latest-url', methods=['GET'])
     def latest_url():

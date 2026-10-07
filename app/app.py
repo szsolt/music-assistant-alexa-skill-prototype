@@ -297,6 +297,9 @@ try:
 except Exception:
     pass
 
+# Pause MA when a player page goes quiet (see skill/bell.py).
+bell.start_sweeping()
+
 
 def _setup_reader_thread(proc, prefix=None):
     # Delegate implementation to helpers while binding enqueue function
