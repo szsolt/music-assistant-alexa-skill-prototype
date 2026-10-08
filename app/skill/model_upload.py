@@ -8,8 +8,9 @@ offers the model as a download instead.
 
 For each locale of the skill that has a voice template, the current model
 is fetched from Amazon, merged with the template and the library names,
-and uploaded. A hash of the names and templates is kept in
-voice_upload.json, so unchanged ones aren't uploaded again.
+and uploaded. A hash of the names and templates is kept per locale in
+voice_upload.json, so unchanged ones aren't uploaded again. A locale that
+fails doesn't hold up the others.
 """
 
 import hashlib
@@ -42,17 +43,21 @@ def _state_path():
     return os.path.join(os.path.dirname(mapping), "voice_upload.json")
 
 
-def _uploaded_hash():
+def _uploaded():
+    """locale -> hash of what was last uploaded for it."""
     try:
         with open(_state_path(), encoding="utf-8") as f:
-            return json.load(f).get("hash")
+            locales = json.load(f).get("locales")
     except (OSError, ValueError):
-        return None
+        return {}
+    return locales if isinstance(locales, dict) else {}
 
 
-def _save_hash(digest, locales):
-    with open(_state_path(), "w", encoding="utf-8") as f:
-        json.dump({"hash": digest, "locales": locales, "at": int(time.time())}, f)
+def _save(uploaded):
+    tmp = _state_path() + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"locales": uploaded, "at": int(time.time())}, f)
+    os.replace(tmp, _state_path())
 
 
 def _key(voice_types):
@@ -97,8 +102,10 @@ def _wait_for_build(client, skill_id, locale):
         if request.get("status") == "SUCCEEDED":
             return
         if request.get("status") == "FAILED":
+            steps = (request.get("buildDetails") or {}).get("steps") or []
+            failed = [step.get("name") for step in steps if step.get("status") == "FAILED"]
             errors = [e.get("message") for e in request.get("errors") or []]
-            raise UploadFailed(f"{locale} build failed: {errors}")
+            raise UploadFailed(f"{locale} build failed in {failed}: {errors}")
     raise UploadFailed(f"{locale} build didn't finish in {BUILD_TIMEOUT_S} s")
 
 
@@ -109,23 +116,40 @@ def upload(voice_types):
     """
     if not configured():
         return None
-    if not voice_types or _key(voice_types) == _uploaded_hash():
+    if not voice_types:
         return []
     from ask_sdk_model_runtime.exceptions import ServiceException
+    key = _key(voice_types)
+    uploaded = _uploaded()
     skill_id = os.environ["SKILL_ID"]
     client = _client()
-    done = []
+    done, failed = [], []
     try:
-        for locale in _locales(client, skill_id):
-            template = voice_model.template_for(locale)
-            if not template:
-                continue
+        locales = _locales(client, skill_id)
+    except ServiceException as e:
+        raise UploadFailed(f"Amazon said {e.status_code}: {e}") from e
+    for locale in locales:
+        template = voice_model.template_for(locale)
+        if not template or uploaded.get(locale) == key:
+            continue
+        try:
             base = client.get_interaction_model_v1(skill_id, STAGE, locale)
             model = voice_model.merge(base, template, voice_types["types"])
             client.set_interaction_model_v1(skill_id, STAGE, locale, model)
             _wait_for_build(client, skill_id, locale)
-            done.append(locale)
-    except ServiceException as e:
-        raise UploadFailed(f"Amazon said {e.status_code}: {e}") from e
-    _save_hash(_key(voice_types), done)
+        except ServiceException as e:
+            failed.append(f"{locale}: Amazon said {e.status_code}: {e}")
+            continue
+        except UploadFailed as e:
+            failed.append(str(e))
+            continue
+        except Exception as e:      # a network error or an odd model must not stop the other locales
+            failed.append(f"{locale}: {e!r}")
+            continue
+        logger.info("Voice model uploaded for %s", locale)
+        uploaded[locale] = key
+        _save(uploaded)
+        done.append(locale)
+    if failed:
+        raise UploadFailed("; ".join(failed))
     return done

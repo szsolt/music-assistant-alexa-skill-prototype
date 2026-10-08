@@ -212,6 +212,46 @@ def test_upload_merges_each_locale_with_a_template_once(monkeypatch, tmp_path):
     assert model_upload.upload(voice) == [] and not sent           # same names: no upload
 
 
+def test_upload_failing_locale_does_not_hold_up_the_others(monkeypatch, tmp_path):
+    import pytest
+    pytest.importorskip("ask_sdk_model_runtime")
+    from skill import model_upload
+    monkeypatch.setenv("DEVICE_MAPPING_PATH", str(tmp_path / "m.json"))
+    monkeypatch.setenv("SKILL_ID", "skill")
+    monkeypatch.setattr(model_upload, "configured", lambda: True)
+    monkeypatch.setattr(model_upload, "BUILD_POLL_S", 0)
+    sent = []
+    status = {"interactionModel": {
+        "en-AU": {"lastUpdateRequest": {"status": "SUCCEEDED"}},
+        "en-US": {"lastUpdateRequest": {"status": "FAILED", "buildDetails": {"steps": [
+            {"name": "LANGUAGE_MODEL_QUICK_BUILD", "status": "SUCCEEDED"},
+            {"name": "LANGUAGE_MODEL_FULL_BUILD", "status": "FAILED"}]}}}}}
+    client = NS(
+        get_skill_manifest_v1=lambda *_: {"manifest": {"publishingInformation": {
+            "locales": {"en-US": {}, "en-AU": {}}}}},
+        get_interaction_model_v1=lambda *_: {"interactionModel": {"languageModel": {"intents": [], "types": []}}},
+        set_interaction_model_v1=lambda _id, _stage, locale, model: sent.append(locale),
+        get_skill_status_v1=lambda *_, **__: status)
+    monkeypatch.setattr(model_upload, "_client", lambda: client)
+    voice = {"hash": "h1", "types": []}
+    with pytest.raises(model_upload.UploadFailed, match=r"en-US build failed in \['LANGUAGE_MODEL_FULL_BUILD'\]"):
+        model_upload.upload(voice)
+    assert sent == ["en-AU", "en-US"]
+    sent.clear()
+    with pytest.raises(model_upload.UploadFailed):
+        model_upload.upload(voice)
+    assert sent == ["en-US"]                                       # en-AU is up to date
+    sent.clear()
+
+    def down(_id, _stage, locale, model):
+        sent.append(locale)
+        raise ConnectionError("down")
+    client.set_interaction_model_v1 = down
+    with pytest.raises(model_upload.UploadFailed, match="en-AU: ConnectionError.*en-US: ConnectionError"):
+        model_upload.upload({"hash": "h2", "types": []})
+    assert sent == ["en-AU", "en-US"]                              # one error doesn't stop the rest
+
+
 def test_upload_needs_credentials(monkeypatch):
     from skill import model_upload
     monkeypatch.setattr(model_upload, "get_env_secret", lambda name: None)

@@ -77,8 +77,6 @@ def _loop():
             uploaded = model_upload.upload(load())
             if uploaded is None:
                 logger.info("Voice model: no LWA credentials, not uploading (download it from /status)")
-            elif uploaded:
-                logger.info("Voice model uploaded for %s", ", ".join(uploaded))
         except Exception as e:
             logger.warning("Voice model: upload failed, trying again tomorrow: %s", e)
         time.sleep(EVERY_S)
