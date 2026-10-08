@@ -196,6 +196,14 @@ class TrackChangeTracker:
             return entry["offset"] + entry["duration"]
 
 
+# Titles longer than this are shown smaller, so they fit in their lines.
+LONG_TITLE_CHARS = 40
+
+
+def long_title(title):
+    return len(title or "") > LONG_TITLE_CHARS
+
+
 # Per page (its id), shared by the pages the skill builds (apl.py) and their events.
 pages = TrackChangeTracker()
 
@@ -209,6 +217,7 @@ def upcoming_commands(queue_end_ms, upcoming):
                  "property": "queueEnd", "value": int(queue_end_ms or 0)}]
     upcoming = upcoming or {}
     for prop, value in (("nextTitle", upcoming.get("title", "")),
+                        ("nextTitleLong", long_title(upcoming.get("title"))),
                         ("nextSecondary", upcoming.get("secondary", "")),
                         ("nextImage", upcoming.get("image", "")),
                         ("nextDuration", int(upcoming.get("duration_ms") or 0) if upcoming else -1)):

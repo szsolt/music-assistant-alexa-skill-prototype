@@ -113,6 +113,7 @@ def add_apl(response_builder, start_paused=False, device_id=None):
             "headerSubtitle": metadata.get("headerSubtitle", ""),
             "primaryText": metadata.get("primaryText", ""),
             "secondaryText": metadata.get("secondaryText", ""),
+            "primaryTextLong": track_time.long_title(metadata.get("primaryText")),
         })
         # The page's doorbell (see bell.py): where the Show finds the skill on the LAN
         bell_page = bell.new_page(device_id)

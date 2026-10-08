@@ -18,7 +18,7 @@ from ask_sdk_model.interfaces import display
 from ask_sdk_core.response_helper import ResponseFactory
 from ask_sdk_core.handler_input import HandlerInput
 from ask_sdk_model.interfaces.alexa.presentation.apl import ExecuteCommandsDirective, ControlMediaCommand, MediaCommandType
-from . import data
+from . import data, track_time
 from .apl import add_apl
 
 
@@ -344,11 +344,18 @@ def update_apl_metadata(response_builder, info=None, shown=None):
 
         # Update primary text (song title)
         if info.get("primaryText"):
+            for component in ("Audio_PrimaryText", "Audio_PrimaryTextLong"):
+                commands.append({
+                    "type": "SetValue",
+                    "componentId": component,
+                    "property": "text",
+                    "value": info["primaryText"]
+                })
             commands.append({
                 "type": "SetValue",
-                "componentId": "Audio_PrimaryText",
-                "property": "text",
-                "value": info["primaryText"]
+                "componentId": "AudioPlayerRoot",
+                "property": "titleLong",
+                "value": track_time.long_title(info["primaryText"])
             })
 
         # Update secondary text (artist/album)

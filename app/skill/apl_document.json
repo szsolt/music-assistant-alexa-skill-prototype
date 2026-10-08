@@ -32,6 +32,7 @@
         "trackInfoLeftPadding": "@spacingMedium",
         "transportLayoutMargins": "0",
         "clockFontSize": "44dp",
+        "longTitleFontSize": "40dp",
         "upNextImageSize": "56dp",
         "upNextWidth": "36%"
       },
@@ -185,6 +186,12 @@
           "description": "The current track's length (ms), as startOffset.",
           "type": "number",
           "default": 0
+        },
+        {
+          "name": "primaryTextLong",
+          "description": "The title is long: show it smaller.",
+          "type": "boolean",
+          "default": false
         }
       ],
       "item": [
@@ -224,9 +231,19 @@
               "value": "${startDuration}"
             },
             {
+              "name": "titleLong",
+              "type": "boolean",
+              "value": "${primaryTextLong}"
+            },
+            {
               "name": "nextTitle",
               "type": "string",
               "value": ""
+            },
+            {
+              "name": "nextTitleLong",
+              "type": "boolean",
+              "value": false
             },
             {
               "name": "nextSecondary",
@@ -588,6 +605,21 @@
                                 "accessibilityLabel": "${primaryText}",
                                 "text": "${primaryText}",
                                 "style": "textStyleDisplay4",
+                                "maxLines": "@primarySongTextMaxLines",
+                                "display": "${titleLong && !(@viewportProfile == @hubLandscapeSmall || @viewportProfile == @hubRoundSmall) ? 'none' : 'normal'}",
+                                "textAlign": "${@viewportProfile != @hubRoundSmall ? 'auto' : 'center'}",
+                                "paddingBottom": "@spacingXSmall"
+                              },
+                              {
+                                "type": "Text",
+                                "id": "Audio_PrimaryTextLong",
+                                "description": "The title when it is long: smaller, so it fits in its lines. Small screens show one line anyway.",
+                                "accessibilityLabel": "${primaryText}",
+                                "text": "${primaryText}",
+                                "style": "textStyleDisplay4",
+                                "fontSize": "@longTitleFontSize",
+                                "maxLines": "@primarySongTextMaxLines",
+                                "display": "${titleLong && !(@viewportProfile == @hubLandscapeSmall || @viewportProfile == @hubRoundSmall) ? 'normal' : 'none'}",
                                 "textAlign": "${@viewportProfile != @hubRoundSmall ? 'auto' : 'center'}",
                                 "paddingBottom": "@spacingXSmall"
                               },
@@ -597,6 +629,7 @@
                                 "accessibilityLabel": "${secondaryText}",
                                 "text": "${secondaryText}",
                                 "style": "textStyleBody",
+                                "maxLines": "@secondarySongTextMaxLines",
                                 "textAlign": "${@viewportProfile != @hubRoundSmall ? 'auto' : 'center'}"
                               }
                             ]
@@ -716,6 +749,17 @@
                               "componentId": "Audio_PrimaryText",
                               "property": "text",
                               "value": "${nextTitle}"
+                            },
+                            {
+                              "type": "SetValue",
+                              "componentId": "Audio_PrimaryTextLong",
+                              "property": "text",
+                              "value": "${nextTitle}"
+                            },
+                            {
+                              "type": "SetValue",
+                              "property": "titleLong",
+                              "value": "${nextTitleLong}"
                             },
                             {
                               "type": "SetValue",
