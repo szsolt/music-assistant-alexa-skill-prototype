@@ -300,6 +300,13 @@ except Exception:
 # Pause MA when a player page goes quiet (see skill/bell.py).
 bell.start_sweeping()
 
+# The pages' "Up next" follows MA's queue changes (see skill/ma_events.py).
+try:
+    from skill import ma_events
+    ma_events.start()
+except Exception:
+    app.logger.exception("Could not start listening to MA's queue changes")
+
 
 def _setup_reader_thread(proc, prefix=None):
     # Delegate implementation to helpers while binding enqueue function
