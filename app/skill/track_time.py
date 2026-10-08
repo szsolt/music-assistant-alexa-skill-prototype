@@ -35,11 +35,12 @@ def track_key(info):
     """What identifies the playing track in the skill's metadata (data.info)."""
     return (info.get('audioSources') or '',
             info.get('primaryText') or '',
-            info.get('secondaryText') or '')
+            info.get('secondaryText') or '',
+            info.get('albumText') or '')
 
 
 def title_key(info):
-    """The track by title and artist only: MA's resume gives it a new stream URL."""
+    """The track by title, artist and album only: MA's resume gives it a new stream URL."""
     return track_key(info)[1:]
 
 
@@ -233,11 +234,24 @@ def upcoming_commands(queue_end_ms, upcoming):
                         ("nextSecondary", upcoming.get("secondary", "")),
                         ("nextImage", upcoming.get("image", "")),
                         ("nextDuration", int(upcoming.get("duration_ms") or 0) if upcoming else -1),
-                        # Last: pages opened before the third title size lack it.
-                        ("nextTitleSize", title_size(upcoming.get("title")))):
+                        ("nextTitleSize", title_size(upcoming.get("title"))),
+                        ("nextAlbum", upcoming.get("album", ""))):
         commands.append({"type": "SetValue", "componentId": "AudioPlayerRoot",
                          "property": prop, "value": value})
     return commands
+
+
+# Pages opened before the third title size or the album line lack these.
+_NEW_PAGE_ONLY = ("nextTitleSize", "nextAlbum")
+
+
+def new_page_only_last(commands):
+    """commands, with the ones older open pages lack moved to the end.
+
+    Those pages should still take every other command of the update.
+    """
+    new_only = [c for c in commands if c.get("property") in _NEW_PAGE_ONLY]
+    return [c for c in commands if c not in new_only] + new_only
 
 
 def set_track_time_commands(offset_ms, duration_ms, shown_ms=None, queue_end_ms=None,
@@ -249,7 +263,7 @@ def set_track_time_commands(offset_ms, duration_ms, shown_ms=None, queue_end_ms=
     directly, for a paused page: the slider only follows the video's time
     updates, and a paused video sends none. queue_end_ms: where MA's queue
     ends in the video, on its last track (the page stops there); else 0.
-    upcoming: the next track (title, secondary, image, duration_ms), which
+    upcoming: the next track (title, secondary, album, image, duration_ms), which
     the page shows by itself at the track's end, before the skill's next
     update arrives; None: nothing to switch to.
     """
@@ -264,4 +278,4 @@ def set_track_time_commands(offset_ms, duration_ms, shown_ms=None, queue_end_ms=
     if shown_ms is not None:
         commands.append({"type": "SetValue", "componentId": "slider",
                          "property": "progressValue", "value": max(int(shown_ms), 0)})
-    return commands
+    return new_page_only_last(commands)

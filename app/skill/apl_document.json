@@ -34,12 +34,13 @@
         "clockFontSize": "44dp",
         "longTitleFontSize": "40dp",
         "longerTitleFontSize": "32dp",
+        "albumFontSize": "24dp",
         "upNextImageSize": "56dp",
         "upNextWidth": "36%"
       },
       "numbers": {
         "primarySongTextMaxLines": 2,
-        "secondarySongTextMaxLines": 2
+        "secondarySongTextMaxLines": 1
       }
     },
     {
@@ -64,12 +65,13 @@
         "sliderIndeterminateHeight": "60dp",
         "sliderPaddingTop": "0",
         "clockFontSize": "28dp",
+        "albumFontSize": "18dp",
         "upNextImageSize": "36dp",
         "upNextWidth": "45%"
       },
       "numbers": {
         "primarySongTextMaxLines": 1,
-        "secondarySongTextMaxLines": 2
+        "secondarySongTextMaxLines": 1
       }
     },
     {
@@ -105,7 +107,7 @@
       },
       "numbers": {
         "primarySongTextMaxLines": 4,
-        "secondarySongTextMaxLines": 2
+        "secondarySongTextMaxLines": 1
       }
     },
     {
@@ -187,6 +189,11 @@
           "description": "The current track's length (ms), as startOffset.",
           "type": "number",
           "default": 0
+        },
+        {
+          "name": "albumText",
+          "description": "The album, on its own line below the artist.",
+          "type": "string"
         },
         {
           "name": "primaryTextSize",
@@ -272,6 +279,16 @@
             },
             {
               "name": "nextSecondary",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "name": "album",
+              "type": "string",
+              "value": "${albumText}"
+            },
+            {
+              "name": "nextAlbum",
               "type": "string",
               "value": ""
             },
@@ -669,6 +686,18 @@
                                 "style": "textStyleBody",
                                 "maxLines": "@secondarySongTextMaxLines",
                                 "textAlign": "${@viewportProfile != @hubRoundSmall ? 'auto' : 'center'}"
+                              },
+                              {
+                                "type": "Text",
+                                "id": "Audio_AlbumText",
+                                "description": "The album: one line, smaller and dimmer than the artist. None on the round screen, or without an album.",
+                                "accessibilityLabel": "${album}",
+                                "text": "${album}",
+                                "style": "textStyleBody",
+                                "fontSize": "@albumFontSize",
+                                "opacity": 0.7,
+                                "maxLines": 1,
+                                "display": "${album != '' && @viewportProfile != @hubRoundSmall ? 'normal' : 'none'}"
                               }
                             ]
                           }
@@ -810,6 +839,11 @@
                               "componentId": "Audio_SecondaryText",
                               "property": "text",
                               "value": "${nextSecondary}"
+                            },
+                            {
+                              "type": "SetValue",
+                              "property": "album",
+                              "value": "${nextAlbum}"
                             },
                             {
                               "type": "SetValue",

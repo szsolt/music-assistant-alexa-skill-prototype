@@ -352,13 +352,14 @@ def update_apl_metadata(response_builder, info=None, shown=None):
                     "value": info["primaryText"]
                 })
 
-        # Update secondary text (artist/album)
-        if info.get("secondaryText"):
+        # Update secondary text (artist); with a new title even when empty,
+        # so a track with no artist doesn't keep the last one's.
+        if info.get("primaryText") or info.get("secondaryText"):
             commands.append({
                 "type": "SetValue",
                 "componentId": "Audio_SecondaryText",
                 "property": "text",
-                "value": info["secondaryText"]
+                "value": info.get("secondaryText") or ""
             })
 
         # Update cover image and bound data so conditional rendering refreshes.
@@ -391,8 +392,8 @@ def update_apl_metadata(response_builder, info=None, shown=None):
                 "value": background_image
             })
 
-        # Last: pages opened before the third title size lack these, and
-        # should still take the updates above.
+        # Last: pages opened before the third title size or the album line
+        # lack these, and should still take the updates above.
         if info.get("primaryText"):
             commands.append({
                 "type": "SetValue",
@@ -405,6 +406,13 @@ def update_apl_metadata(response_builder, info=None, shown=None):
                 "componentId": "AudioPlayerRoot",
                 "property": "titleSize",
                 "value": track_time.title_size(info["primaryText"])
+            })
+            # Even when empty: a track with no album hides the last one's.
+            commands.append({
+                "type": "SetValue",
+                "componentId": "AudioPlayerRoot",
+                "property": "album",
+                "value": info.get("albumText") or ""
             })
 
         # Send ExecuteCommands directive if we have any commands

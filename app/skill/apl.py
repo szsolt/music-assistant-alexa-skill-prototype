@@ -134,6 +134,7 @@ def add_apl(response_builder, start_paused=False, device_id=None):
             "headerSubtitle": metadata.get("headerSubtitle", ""),
             "primaryText": metadata.get("primaryText", ""),
             "secondaryText": metadata.get("secondaryText", ""),
+            "albumText": metadata.get("albumText", ""),
             "primaryTextSize": track_time.title_size(metadata.get("primaryText")),
         })
         # The page's doorbell (see bell.py): where the Show finds the skill on the LAN
@@ -177,7 +178,8 @@ def _get_metadata(device_id=None):
                 "headerTitle": "",
                 "headerSubtitle": "",
                 "primaryText": store.get("title", ""),
-                "secondaryText": _build_secondary_text(store)
+                "secondaryText": store.get("artist", ""),
+                "albumText": store.get("album", ""),
             }
     except Exception as e:
         logging.debug("shared_store read failed in APL: %s", e)
@@ -190,16 +192,3 @@ def _get_metadata(device_id=None):
         pass
 
     return None
-
-
-def _build_secondary_text(store):
-    """Build secondary text from artist and album."""
-    artist = store.get("artist", "")
-    album = store.get("album", "")
-    if artist and album:
-        return f"{artist} - {album}"
-    elif artist:
-        return artist
-    elif album:
-        return album
-    return ""

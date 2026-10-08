@@ -153,7 +153,7 @@ async def _get_track_time(server_url, token, player_id):
 
 
 def _upcoming(client, item):
-    """What the page shows for the queue's next item: title, artist - album, image, length."""
+    """What the page shows for the queue's next item: title, artist, album, image, length."""
     if item is None:
         return None
     media = item.media_item
@@ -169,7 +169,8 @@ def _upcoming(client, item):
         image = ""
     duration = getattr(media, "duration", None) or item.duration
     return {"title": title,
-            "secondary": " - ".join(part for part in (artist, album) if part),
+            "secondary": artist,
+            "album": album,
             "image": image,
             "duration_ms": int(duration * 1000) if duration else 0}
 
@@ -179,7 +180,7 @@ def get_current_track_time(player_id):
 
     duration_ms is None when MA doesn't know the length (e.g. radio); last
     is True when nothing follows it in the queue. upcoming: the next
-    track's title, secondary (artist - album), image and duration_ms (0 if
+    track's title, secondary (artist), album, image and duration_ms (0 if
     unknown), or None: the page switches to it at the track's end.
     Called once per track change from the APL refresh, not per refresh.
     """

@@ -22,7 +22,7 @@ def _set(info, shown, monkeypatch):
 
 
 def _info(image):
-    return {"primaryText": "Song", "secondaryText": "Artist",
+    return {"primaryText": "Song", "secondaryText": "Artist", "albumText": "Album",
             "coverImageSource": image, "backgroundImageSource": image}
 
 
@@ -31,7 +31,7 @@ def test_images_the_page_shows_are_not_set_again(monkeypatch):
     assert ("AlexaBackground", "backgroundImageSource") in _set(_info("a.jpg"), shown, monkeypatch)
     assert _set(_info("a.jpg"), shown, monkeypatch) == [
         ("Audio_PrimaryText", "text"), ("Audio_PrimaryTextLong", "text"), ("Audio_SecondaryText", "text"),
-        ("Audio_PrimaryTextLonger", "text"), ("AudioPlayerRoot", "titleSize")]
+        ("Audio_PrimaryTextLonger", "text"), ("AudioPlayerRoot", "titleSize"), ("AudioPlayerRoot", "album")]
 
 
 def test_the_image_the_page_switched_to_itself_is_not_set_again(monkeypatch):
@@ -67,3 +67,40 @@ def test_the_page_starts_with_the_title_size_it_needs(monkeypatch, title, size):
     builder = _Builder()
     apl.add_apl(builder)
     assert builder.directives[0].document["mainTemplate"]["items"][0]["primaryTextSize"] == size
+
+
+def test_artist_and_album_have_a_line_each_that_follows_track_changes():
+    import json, pathlib
+    document = json.loads((pathlib.Path(apl.__file__).parent / "apl_document.json").read_text())
+    layout = document["layouts"]["AudioPlayer"]
+    texts = {c.get("id"): c for c in apl._components(layout) if c.get("type") == "Text"}
+    assert texts["Audio_SecondaryText"]["maxLines"] == "@secondarySongTextMaxLines"
+    assert all(r.get("numbers", {}).get("secondarySongTextMaxLines", 1) == 1 for r in document["resources"])
+    album = texts["Audio_AlbumText"]
+    assert album["text"] == "${album}" and album["maxLines"] == 1
+    assert {"name": "album", "type": "string", "value": "${albumText}"} in layout["item"][0]["bind"]
+    def nodes(node):
+        if isinstance(node, dict):
+            yield node
+            yield from (n for v in node.values() for n in nodes(v))
+        elif isinstance(node, list):
+            yield from (n for v in node for n in nodes(v))
+    flip = next(c for c in nodes(layout) if c.get("type") == "Sequential"
+                and "videoProgressValue - trackOffset >= trackDuration" in c.get("when", ""))
+    assert {"type": "SetValue", "property": "album", "value": "${nextAlbum}"} in flip["commands"]
+
+
+def test_the_page_starts_with_the_album(monkeypatch):
+    monkeypatch.setattr(apl, "_get_metadata", lambda device_id=None: {"primaryText": "T", "albumText": "Alb"})
+    builder = _Builder()
+    apl.add_apl(builder)
+    assert builder.directives[0].document["mainTemplate"]["items"][0]["albumText"] == "Alb"
+
+
+def test_a_track_with_no_artist_or_album_clears_the_last_ones(monkeypatch):
+    builder = _Builder()
+    monkeypatch.setattr(util, "apl_enabled", lambda: True)
+    monkeypatch.setattr(util, "get_ma_hostname", lambda **kw: "")
+    util.update_apl_metadata(builder, {"primaryText": "Radio"}, {})
+    values = {(c["componentId"], c["property"]): c["value"] for d in builder.directives for c in d.commands}
+    assert values[("Audio_SecondaryText", "text")] == "" and values[("AudioPlayerRoot", "album")] == ""

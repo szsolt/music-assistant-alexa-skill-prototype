@@ -62,7 +62,8 @@ info = {
     "headerTitle": "",
     "headerSubtitle": "",
     "primaryText": "",
-    "secondaryText": ""
+    "secondaryText": "",
+    "albumText": ""
 }
 
 def info_from(payload):
@@ -72,7 +73,6 @@ def info_from(payload):
     artist = payload.get('artist', '') or ''
     album = payload.get('album', '') or ''
     image = payload.get('imageUrl') or ''
-    secondary = ' - '.join(part for part in (artist, album) if part)
     if stream_url and isinstance(stream_url, str):
         try:
             stream_url = re.sub(r'(?i)\.flac(?=$|\?)', '.mp3', stream_url)
@@ -86,7 +86,8 @@ def info_from(payload):
         'headerTitle': '',
         'headerSubtitle': '',
         'primaryText': title,
-        'secondaryText': secondary
+        'secondaryText': artist,
+        'albumText': album
     }
 
 
@@ -147,14 +148,6 @@ def get_latest(api_hostname=None, path='/ma/latest-url', scheme='http', timeout=
             album = payload.get('album', '') or ''
             image = payload.get('imageUrl') or ''
 
-            secondary = ''
-            if artist and album:
-                secondary = f"{artist} - {album}"
-            elif artist:
-                secondary = artist
-            elif album:
-                secondary = album
-
             if stream_url and isinstance(stream_url, str):
                 try:
                     stream_url = re.sub(r'(?i)\.flac(?=$|\?)', '.mp3', stream_url)
@@ -169,7 +162,8 @@ def get_latest(api_hostname=None, path='/ma/latest-url', scheme='http', timeout=
                 'headerTitle': '',
                 'headerSubtitle': '',
                 'primaryText': title,
-                'secondaryText': secondary
+                'secondaryText': artist,
+                'albumText': album
             })
 
             return {'changed': True}

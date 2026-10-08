@@ -1203,10 +1203,11 @@ def _track_time_commands(handler_input, arguments, page_key, info):
     shown = (position_ms or 0) - offset if paused and offset is not None else None
     upcoming = _with_ma_hostname(upcoming)
     _images_on(page_key)["next"] = (upcoming or {}).get("image") or None
-    return (track_time.set_track_time_commands(offset, duration_ms, shown,
-                                               _track_changes.queue_end_ms(session_id), upcoming)
-            + _favorite_commands(_favorites_of(player_id))
-            + _mode_commands(_modes_of(player_id)))
+    return track_time.new_page_only_last(
+        track_time.set_track_time_commands(offset, duration_ms, shown,
+                                           _track_changes.queue_end_ms(session_id), upcoming)
+        + _favorite_commands(_favorites_of(player_id))
+        + _mode_commands(_modes_of(player_id)))
 
 
 def _images_on(page_key):
