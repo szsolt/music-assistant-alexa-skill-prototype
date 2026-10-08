@@ -142,3 +142,9 @@ def test_move_to_an_unknown_player_keeps_playing_here(move):
 def test_move_to_the_player_already_playing_says_so(move):
     response = lf.MoveMusicHandler().handle(_input("MoveMusic", {"player": _slot("here", "Here")}))
     assert move == [] and "already" in response.output_speech.ssml
+
+
+def test_like_something_other_than_song_album_artist_does_nothing(page, monkeypatch):
+    monkeypatch.setattr(lf.ma_voice, "set_favorite", lambda *a: pytest.fail("changed a favourite"))
+    response = lf.FavoriteHandler().handle(_input("AddFavorite", {"what": _slot("Queen")}))
+    assert response.output_speech is None and response.should_end_session is None

@@ -211,6 +211,12 @@
    ],
    "samples": [
     "like this {what}",
+    "like the {what}",
+    "like {what}",
+    "love the {what}",
+    "love {what}",
+    "favourite the {what}",
+    "favorite the {what}",
     "I like this {what}",
     "love this {what}",
     "I love this {what}",
@@ -243,6 +249,10 @@
    ],
    "samples": [
     "unlike this {what}",
+    "unlike the {what}",
+    "unlike {what}",
+    "unfavourite the {what}",
+    "unfavorite the {what}",
     "I don't like this {what}",
     "unfavourite this {what}",
     "unfavorite this {what}",

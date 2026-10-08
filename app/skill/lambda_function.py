@@ -752,6 +752,8 @@ class FavoriteHandler(AbstractRequestHandler):
         _ = handler_input.attributes_manager.request_attributes["_"]
         intent = handler_input.request_envelope.request.intent
         kind = voice_commands.favorite_kind(intent.slots)
+        if kind is None:
+            return UnhandledIntentHandler().handle(handler_input)
         on = voice_commands.FAVORITE_INTENTS[intent.name]
         logger.info("Voice command %s: %s", intent.name, kind)
         player_id = device_mapping.get_player_for_device(_device_id_from(handler_input))

@@ -23,6 +23,13 @@ _MAX_SESSIONS = 32
 # started mid-track (MA's own resume); below it, it's startup delay.
 _MID_TRACK_START_MS = 15_000
 
+# MA gives track lengths in whole seconds, so adding them up drifts by up to
+# a second a track. Further off than _RESYNC_MS from MA's clock, the page
+# resyncs; the margin covers the time MA takes to answer. Further off than
+# _RESYNC_MAX_MS, the page's position is not to be trusted (still 0, stuck).
+_RESYNC_MS = 2_000
+_RESYNC_MAX_MS = 30_000
+
 
 def track_key(info):
     """What identifies the playing track in the skill's metadata (data.info)."""
@@ -64,14 +71,18 @@ def track_offset_ms(position_ms, elapsed_ms):
 def choose_offset_ms(previous_end_ms, position_ms, elapsed_ms):
     """Where the current track started in the page's video, in ms, or None.
 
-    The end of the previous track when known; otherwise the video position
-    minus MA's elapsed time, which needs the position from the page.
+    The end of the previous track when known, unless the video position
+    minus MA's elapsed time is _RESYNC_MS to _RESYNC_MAX_MS off it. Without
+    the previous end, that measured start, which needs the page's position.
     """
-    if previous_end_ms is not None:
-        return previous_end_ms
+    measured = None
     if position_ms is not None and elapsed_ms is not None:
-        return track_offset_ms(position_ms, elapsed_ms)
-    return None
+        measured = track_offset_ms(position_ms, elapsed_ms)
+    if previous_end_ms is None:
+        return measured
+    if measured is not None and _RESYNC_MS < abs(measured - previous_end_ms) <= _RESYNC_MAX_MS:
+        return measured
+    return previous_end_ms
 
 
 def page_start_offset_ms(position_ms, paused, paused_at_ms, elapsed_ms, stream_start_ms,

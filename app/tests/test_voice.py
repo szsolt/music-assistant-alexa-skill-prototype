@@ -277,4 +277,5 @@ def test_favorite_kind_from_what_was_said():
     slots = {"what": NS(value="record", resolutions=None)}
     assert voice_commands.favorite_kind(slots) == "album"
     assert voice_commands.favorite_kind({}) == "song"
+    assert voice_commands.favorite_kind({"what": NS(value="Queen", resolutions=None)}) is None
     assert voice_commands.FAVORITE_INTENTS == {"AddFavorite": True, "RemoveFavorite": False}

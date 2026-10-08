@@ -33,8 +33,12 @@ _FAVORITE_WORDS = {"song": "song", "track": "song", "tune": "song", "album": "al
 
 
 def favorite_kind(slots):
-    """What "like this X" means: "song" (also when X is missing), "album" or "artist"."""
-    return _FAVORITE_WORDS.get((slot_text(slots, "what") or "").lower(), "song")
+    """What "like this X" means: "song" (also when X is missing), "album" or "artist".
+
+    None for any other X: "like Queen" isn't a request to like the playing song.
+    """
+    what = slot_text(slots, "what")
+    return _FAVORITE_WORDS.get(what.lower()) if what else "song"
 
 
 def slot_text(slots, name):

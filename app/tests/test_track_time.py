@@ -74,7 +74,17 @@ def test_set_track_time_commands_unknown():
 
 def test_offset_prefers_previous_track_end():
     assert tt.choose_offset_ms(215_000, None, 3_000) == 215_000
-    assert tt.choose_offset_ms(215_000, 400_000, 3_000) == 215_000
+    assert tt.choose_offset_ms(215_000, 219_500, 3_000) == 215_000    # 1.5 s off: MA's answer took that long
+
+
+def test_offset_resyncs_to_ma_when_the_track_ends_drifted():
+    # Whole-second lengths added up: the page's track started 10 s off MA's.
+    assert tt.choose_offset_ms(215_000, 208_000, 3_000) == 205_000
+    assert tt.choose_offset_ms(215_000, 228_000, 3_000) == 225_000
+
+
+def test_offset_ignores_a_position_far_off():
+    assert tt.choose_offset_ms(3_600_000, 0, 5_000) == 3_600_000      # a page whose video hasn't started
 
 
 def test_offset_falls_back_to_position_then_none():
