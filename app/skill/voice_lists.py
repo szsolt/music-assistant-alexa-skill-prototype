@@ -46,6 +46,9 @@ def load():
 def refresh():
     """Rebuild the slot types from MA. Returns (hash, counts, changed)."""
     types, counts = voice_names.build_types(ma_voice.library_names())
+    players = [name for _, name in ma_voice.players()]
+    types.append(voice_names.player_type(players))
+    counts["player"] = len(players)
     digest = voice_names.digest(types)
     old = load()
     if old and old.get("hash") == digest:

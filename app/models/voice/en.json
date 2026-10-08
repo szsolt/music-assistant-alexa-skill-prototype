@@ -259,6 +259,25 @@
     "remove this from my favourites",
     "remove this from my favorites"
    ]
+  },
+  {
+   "name": "MoveMusic",
+   "slots": [
+    {
+     "name": "player",
+     "type": "MA_PLAYER"
+    }
+   ],
+   "samples": [
+    "move the music to {player}",
+    "move music to {player}",
+    "move the music to the {player}",
+    "transfer the music to {player}",
+    "transfer music to {player}",
+    "transfer the music to the {player}",
+    "move playback to {player}",
+    "move the music over to {player}"
+   ]
   }
  ],
  "builtInIntents": [

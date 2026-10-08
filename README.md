@@ -106,6 +106,8 @@ Notes:
 
 Each phrase says what kind of thing to play: "play artist X", "shuffle album X", "play song X", "play playlist X", "queue album X", "play song X next", "play radio for X". While the player screen is open, Alexa sends everything you say to the skill. Without the kind word, "turn off the light" could queue a song. The skill ignores such requests and keeps playing.
 
+"Move the music to the kitchen" moves the queue to another MA player. The music goes on there from the same spot. The skill learns the player names with the library names.
+
 To upload them automatically:
 
 1. In the [Amazon developer console](https://developer.amazon.com/loginwithamazon/console/site/lwa/overview.html), create a Login with Amazon security profile. Note its client id and secret.

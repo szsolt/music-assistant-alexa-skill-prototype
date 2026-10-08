@@ -93,6 +93,31 @@ def library_names():
     return _run(_library_names())
 
 
+# ---------- players (to move the music to) ----------
+
+async def _players():
+    async with _client() as client:
+        await client.players.fetch_state()
+        return [(player.player_id, player.name) for player in client.players.players
+                if player.available and player.enabled and not player.hide_in_ui and player.name]
+
+
+def players():
+    """[(player_id, name), ...] of the players the music can move to."""
+    return _run(_players())
+
+
+async def _move(player_id, target_id):
+    async with _client() as client:
+        await client.player_queues.transfer(await _queue_id(client, player_id),
+                                            await _queue_id(client, target_id), auto_play=True)
+
+
+def move(player_id, target_id):
+    """Move player_id's queue, with its track and position, to target_id and play it there."""
+    _run(_move(player_id, target_id))
+
+
 # ---------- search ----------
 
 def _candidate(kind, item):

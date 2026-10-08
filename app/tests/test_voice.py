@@ -37,6 +37,12 @@ def test_types_dedupe_and_any_type_without_songs():
     assert [t["name"] for t in types] == ["MA_PLAYLIST", "MA_ARTIST", "MA_ALBUM", "MA_SONG", "MA_NAME"]
 
 
+def test_player_names_dedupe_and_never_leave_the_type_empty():
+    players = voice_names.player_type(["Kitchen", "kitchen", "Living Room"])
+    assert [v["name"]["value"] for v in players["values"]] == ["Kitchen", "Living Room"]
+    assert voice_names.player_type([])["values"]
+
+
 def test_budget_keeps_kinds_in_order(monkeypatch):
     monkeypatch.setattr(voice_names, "MAX_VALUES", 5)
     types, counts = voice_names.build_types({
@@ -102,7 +108,7 @@ def test_merge_keeps_invocation_and_replaces_ours():
 
 def test_template_uses_only_known_slot_types():
     template = voice_model.template_for("en-US")
-    known = set(voice_names.SLOT_TYPES.values()) | {voice_names.ANY_TYPE} | {t["name"] for t in template["types"]}
+    known = set(voice_names.SLOT_TYPES.values()) | {voice_names.ANY_TYPE, voice_names.PLAYER_TYPE} | {t["name"] for t in template["types"]}
     used = {s["type"] for i in template["intents"] for s in i["slots"]}
     assert used <= known
     for intent in template["intents"]:

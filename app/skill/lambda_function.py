@@ -13,7 +13,8 @@ from ask_sdk_core.utils import is_request_type, is_intent_name
 from ask_sdk_core.handler_input import HandlerInput
 from ask_sdk_model import Response
 
-from . import data, util, device_mapping, live_page, ma_control, track_time, bell, apl, ma_voice, voice_commands
+from . import (data, util, device_mapping, live_page, ma_control, track_time, bell, apl, ma_voice,
+               voice_commands, voice_match)
 
 sb = StandardSkillBuilder()
 # sb = StandardSkillBuilder(
@@ -876,6 +877,39 @@ class WhatsPlayingHandler(AbstractRequestHandler):
                 return _(data.NOTHING_PLAYING_MSG)
             title, artist = playing
             return _(data.NOW_PLAYING_MSG).format(_(data.BY_MSG).format(title, artist) if artist else title)
+        return _voice_reply(handler_input, run)
+
+class MoveMusicHandler(AbstractRequestHandler):
+    """Move the music to another MA player: "move the music to the kitchen"."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        return is_intent_name("MoveMusic")(handler_input)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        _ = handler_input.attributes_manager.request_attributes["_"]
+        intent = handler_input.request_envelope.request.intent
+        heard = voice_commands.slot_text(intent.slots, "player")
+        logger.info("Move the music: heard %r", heard)
+        if not heard:
+            return _ignore(handler_input)
+        device_id = _device_id_from(handler_input)
+
+        def run(player_id):
+            players = {name: target for target, name in ma_voice.players()}
+            name = heard if heard in players else voice_match.closest(heard, list(players))
+            if not name:
+                logger.info("Move the music: no player like %r", heard)
+                return _(data.NO_PLAYER_MSG).format(heard)
+            if players[name] == player_id:
+                return _(data.ALREADY_THERE_MSG).format(name)
+            logger.info("Move the music: %s -> %s (%r)", player_id, players[name], name)
+            # Close the page first: MA's pause for this Echo must not go to
+            # it as a hand-off, nor be spoken. This Echo stops its stream itself.
+            live_page.closed(device_id)
+            live_page.expect_silent_pause(device_id)
+            ma_voice.move(player_id, players[name])
+            return util.stop(_(data.MOVING_MSG).format(name), handler_input.response_builder)
         return _voice_reply(handler_input, run)
 
 # ###################################################################
@@ -1773,6 +1807,7 @@ sb.add_request_handler(VoicePlayHandler())
 sb.add_request_handler(FavoriteHandler())
 sb.add_request_handler(PlayRandomHandler())
 sb.add_request_handler(WhatsPlayingHandler())
+sb.add_request_handler(MoveMusicHandler())
 sb.add_request_handler(LoopOrShuffleIntentHandler())
 sb.add_request_handler(PlaybackStartedHandler())
 sb.add_request_handler(PlaybackFinishedHandler())

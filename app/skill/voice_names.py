@@ -24,6 +24,7 @@ KINDS = ("playlist", "artist", "album", "song")
 SLOT_TYPES = {"playlist": "MA_PLAYLIST", "artist": "MA_ARTIST",
               "album": "MA_ALBUM", "song": "MA_SONG"}
 ANY_TYPE = "MA_NAME"
+PLAYER_TYPE = "MA_PLAYER"     # MA's players, for "move the music to X"
 
 _BRACKETS = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]")
 _SPACES = re.compile(r"\s+")
@@ -153,6 +154,18 @@ def build_types(names):
             # Amazon rejects an empty slot type.
             slot_type["values"] = [{"name": {"value": "music assistant"}}]
     return types, {kind: len(values[kind]) for kind in KINDS}
+
+
+def player_type(names):
+    """The slot type of MA's player names."""
+    values, seen = [], set()
+    for name in names:
+        entry = slot_value(name)
+        if entry and entry["name"]["value"].lower() not in seen:
+            seen.add(entry["name"]["value"].lower())
+            values.append(entry)
+    # Amazon rejects an empty slot type.
+    return {"name": PLAYER_TYPE, "values": values or [{"name": {"value": "music assistant"}}]}
 
 
 def digest(types):

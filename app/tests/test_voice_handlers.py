@@ -113,3 +113,32 @@ def test_page_alexa_closed_stays_closed_for_a_shared_player_or_a_new_page(reopen
     lf.SkillEventHandler().handle(_session_ended("INTERNAL_SERVICE_ERROR"))
     lp._last_event.clear()
     assert reopen == []
+
+
+@pytest.fixture
+def move(page, monkeypatch):
+    """Echo d plays MA player p; the kitchen and a lamp can take the music. Yields the moves MA got."""
+    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "p")
+    monkeypatch.setattr(lf.ma_voice, "players", lambda: [("p", "Here"), ("k", "Kitchen"), ("l", "Lamp")])
+    moves = []
+    monkeypatch.setattr(lf.ma_voice, "move", lambda player_id, target_id: moves.append((player_id, target_id)))
+    yield moves
+
+
+def test_move_sends_the_music_on_and_closes_this_page(move):
+    response = lf.MoveMusicHandler().handle(_input("MoveMusic", {"player": _slot("kitchen", "Kitchen")}))
+    assert move == [("p", "k")]
+    assert "Kitchen" in response.output_speech.ssml and response.should_end_session is True
+    assert [d.object_type for d in response.directives] == ["AudioPlayer.Stop"]
+    assert not lp.is_live("d") and lp.takes_silent_pause("d")  # MA's pause for d: no hand-off, no speech
+
+
+def test_move_to_an_unknown_player_keeps_playing_here(move):
+    response = lf.MoveMusicHandler().handle(_input("MoveMusic", {"player": _slot("garage")}))
+    assert move == []
+    assert "garage" in response.output_speech.ssml and response.should_end_session is not True
+
+
+def test_move_to_the_player_already_playing_says_so(move):
+    response = lf.MoveMusicHandler().handle(_input("MoveMusic", {"player": _slot("here", "Here")}))
+    assert move == [] and "already" in response.output_speech.ssml
