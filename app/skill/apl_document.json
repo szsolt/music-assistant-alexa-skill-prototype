@@ -193,6 +193,30 @@
           "description": "How long the title is: 0 short, 1 long, 2 longer. Longer ones show smaller.",
           "type": "number",
           "default": 0
+        },
+        {
+          "name": "startShuffleOn",
+          "description": "The first shuffleOn, if the skill knows it when it builds the page; -1 hides the button until the first refresh.",
+          "type": "number",
+          "default": -1
+        },
+        {
+          "name": "startRepeatMode",
+          "description": "The first repeatMode, if the skill knows it when it builds the page; -1 hides the button until the first refresh.",
+          "type": "number",
+          "default": -1
+        },
+        {
+          "name": "startSongFavorite",
+          "description": "The first songFavorite, if the skill knows it when it builds the page; -1 hides the button until the first refresh.",
+          "type": "number",
+          "default": -1
+        },
+        {
+          "name": "startAlbumFavorite",
+          "description": "The first albumFavorite, if the skill knows it when it builds the page; -1 hides the button until the first refresh.",
+          "type": "number",
+          "default": -1
         }
       ],
       "item": [
@@ -304,22 +328,22 @@
             {
               "name": "songFavorite",
               "type": "number",
-              "value": -1
+              "value": "${startSongFavorite}"
             },
             {
               "name": "albumFavorite",
               "type": "number",
-              "value": -1
+              "value": "${startAlbumFavorite}"
             },
             {
               "name": "shuffleOn",
               "type": "number",
-              "value": -1
+              "value": "${startShuffleOn}"
             },
             {
               "name": "repeatMode",
               "type": "number",
-              "value": -1
+              "value": "${startRepeatMode}"
             },
             {
               "name": "upNextBright",

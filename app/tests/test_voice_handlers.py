@@ -148,3 +148,29 @@ def test_like_something_other_than_song_album_artist_does_nothing(page, monkeypa
     monkeypatch.setattr(lf.ma_voice, "set_favorite", lambda *a: pytest.fail("changed a favourite"))
     response = lf.FavoriteHandler().handle(_input("AddFavorite", {"what": _slot("Queen")}))
     assert response.output_speech is None and response.should_end_session is None
+
+
+def test_a_new_page_gets_the_button_states_ma_gives_in_time(monkeypatch):
+    import threading
+    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "p")
+    monkeypatch.setattr(lf.ma_voice, "modes", lambda player_id: {"shuffle": True, "repeat": "one"})
+    monkeypatch.setattr(lf.ma_voice, "favorites", lambda player_id: {"song": True, "album": None})
+    assert lf._start_buttons("d") == {"shuffleOn": 1, "repeatMode": 2, "songFavorite": 1, "albumFavorite": -1}
+    # MA slow with the favourites: the page gets the modes now, the hearts at its first refresh.
+    slow = threading.Event()
+    monkeypatch.setattr(lf, "START_BUTTONS_S", 0.05)
+    monkeypatch.setattr(lf.ma_voice, "favorites", lambda player_id: slow.wait(2) or {})
+    try:
+        assert lf._start_buttons("d") == {"shuffleOn": 1, "repeatMode": 2}
+    finally:
+        slow.set()
+
+
+def test_a_failed_button_state_leaves_the_others(monkeypatch):
+    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "p")
+    monkeypatch.setattr(lf.ma_voice, "modes", lambda player_id: {"shuffle": False, "repeat": "off"})
+
+    def broken(player_id):
+        raise KeyError("song")
+    monkeypatch.setattr(lf.ma_voice, "favorites", broken)
+    assert lf._start_buttons("d") == {"shuffleOn": 0, "repeatMode": 0}

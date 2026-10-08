@@ -3,6 +3,8 @@
 import logging
 import threading
 import time
+from concurrent import futures
+from concurrent.futures import ThreadPoolExecutor
 import gettext
 import os
 from ask_sdk.standard import StandardSkillBuilder
@@ -1333,6 +1335,39 @@ def _mode_commands(modes):
              "value": -1 if modes is None else int(modes["shuffle"])},
             {"type": "SetValue", "componentId": "AudioPlayerRoot", "property": "repeatMode",
              "value": -1 if modes is None else ma_voice.REPEAT_MODES.index(modes["repeat"])}]
+
+
+# A new page waits at most this long for its button states; later, its first refresh brings them.
+START_BUTTONS_S = 1.0
+_start_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="start-buttons")
+
+
+def _start_buttons(device_id):
+    """The shuffle, repeat and heart states for a page the skill builds now, as the page's bind names.
+
+    MA is asked for both at once; what it hasn't answered within
+    START_BUTTONS_S is left out, and those buttons wait for the refresh.
+    """
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        return {}
+    asks = {_start_pool.submit(_modes_of, player_id): _mode_commands,
+            _start_pool.submit(_favorites_of, player_id): _favorite_commands}
+    done, late = futures.wait(asks, timeout=START_BUTTONS_S)
+    if late:
+        logger.info("MA was slow with the button states: the page shows them after its first refresh")
+    for future in late:
+        future.cancel()     # one still waiting for a worker (MA hangs) needn't run at all
+    states = {}
+    for future in done:
+        try:
+            states.update((command["property"], command["value"]) for command in asks[future](future.result()))
+        except Exception:
+            logger.exception("Could not read a button state from MA")
+    return states
+
+
+apl.set_start_buttons(_start_buttons)
 
 
 def _modes_handoff_commands(device_id, page_key):

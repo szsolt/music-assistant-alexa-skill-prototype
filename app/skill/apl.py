@@ -45,18 +45,39 @@ def set_start_track_time(fn):
     _start_track_time = fn
 
 
+# Set by the skill (set_start_buttons): start_buttons(device_id) is the
+# states of the page's shuffle, repeat and heart buttons, as the page's
+# bind names ({"shuffleOn": 1, ...}); the ones it couldn't get are missing.
+_start_buttons = None
+
+
+def set_start_buttons(fn):
+    global _start_buttons
+    _start_buttons = fn
+
+
 def _start_values(device_id):
-    """The page's first trackOffset and trackDuration: the slider is right from the start."""
-    if not _start_track_time or not device_id:
+    """The page's first track time and button states: right from the start, not after its first refresh."""
+    if not device_id:
         return {}
+    values = {}
+    if _start_buttons:
+        try:
+            buttons = _start_buttons(device_id) or {}
+        except Exception:
+            logging.exception("Could not get the button states for a new page")
+            buttons = {}
+        values.update({"start" + name[0].upper() + name[1:]: int(value) for name, value in buttons.items()})
+    if not _start_track_time:
+        return values
     try:
         start = _start_track_time(device_id)
     except Exception:
         logging.exception("Could not get the track time for a new page")
-        return {}
+        return values
     if not start or start[0] is None:
-        return {}
-    return {"startOffset": int(start[0]), "startDuration": int(start[1] or 0)}
+        return values
+    return dict(values, startOffset=int(start[0]), startDuration=int(start[1] or 0))
 
 
 def add_apl(response_builder, start_paused=False, device_id=None):
