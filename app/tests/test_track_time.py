@@ -52,7 +52,7 @@ def test_track_key_uses_stream_and_titles():
 def test_set_track_time_commands():
     cmds = tt.set_track_time_commands(388_000, 215_000)
     assert [(c["property"], c["value"]) for c in cmds] == [("queueEnd", 0), ("trackOffset", 388_000), ("trackDuration", 215_000),
-        ("nextTitle", ""), ("nextTitleLong", False), ("nextSecondary", ""), ("nextImage", ""), ("nextDuration", -1)]
+        ("nextTitle", ""), ("nextSecondary", ""), ("nextImage", ""), ("nextDuration", -1), ("nextTitleSize", 0)]
     assert all(c["componentId"] == "AudioPlayerRoot" for c in cmds)
 
 
@@ -60,16 +60,17 @@ def test_commands_carry_the_next_track():
     upcoming = {"title": "B", "secondary": "Artist - Album", "image": "https://i/b", "duration_ms": 180_000}
     cmds = tt.set_track_time_commands(0, 215_000, upcoming=upcoming)
     assert [(c["property"], c["value"]) for c in cmds][-5:] == [
-        ("nextTitle", "B"), ("nextTitleLong", False), ("nextSecondary", "Artist - Album"), ("nextImage", "https://i/b"),
-        ("nextDuration", 180_000)]
+        ("nextTitle", "B"), ("nextSecondary", "Artist - Album"), ("nextImage", "https://i/b"),
+        ("nextDuration", 180_000), ("nextTitleSize", 0)]
     unknown_length = dict(upcoming, duration_ms=0)
-    assert tt.set_track_time_commands(0, 215_000, upcoming=unknown_length)[-1]["value"] == 0
+    assert tt.set_track_time_commands(0, 215_000, upcoming=unknown_length)[-2] == {
+        "type": "SetValue", "componentId": "AudioPlayerRoot", "property": "nextDuration", "value": 0}
 
 
 def test_set_track_time_commands_unknown():
     cmds = tt.set_track_time_commands(None, None)
     assert [(c["property"], c["value"]) for c in cmds] == [("queueEnd", 0), ("trackDuration", 0),
-                                                                 ("nextTitle", ""), ("nextTitleLong", False), ("nextSecondary", ""), ("nextImage", ""), ("nextDuration", -1)]
+                                                                 ("nextTitle", ""), ("nextSecondary", ""), ("nextImage", ""), ("nextDuration", -1), ("nextTitleSize", 0)]
 
 
 def test_offset_prefers_previous_track_end():
@@ -200,10 +201,10 @@ def test_tracker_page_it_did_not_start_has_no_previous_end():
 def test_upcoming_commands_after_repeat_or_shuffle():
     upcoming = {"title": "B", "secondary": "Artist - Album", "image": "https://i/b", "duration_ms": 180_000}
     values = {c["property"]: c["value"] for c in tt.upcoming_commands(None, upcoming)}
-    assert values == {"queueEnd": 0, "nextTitle": "B", "nextTitleLong": False, "nextSecondary": "Artist - Album",
+    assert values == {"queueEnd": 0, "nextTitle": "B", "nextTitleSize": 0, "nextSecondary": "Artist - Album",
                       "nextImage": "https://i/b", "nextDuration": 180_000}
     long = dict(upcoming, title="Transit Blues I. (Budapest - Rotterdam), live")
-    assert {c["property"]: c["value"] for c in tt.upcoming_commands(None, long)}["nextTitleLong"] is True
+    assert {c["property"]: c["value"] for c in tt.upcoming_commands(None, long)}["nextTitleSize"] == 2
     # nothing follows: the page stops at the queue's end, and shows no next song
     values = {c["property"]: c["value"] for c in tt.upcoming_commands(290_000, None)}
     assert values["queueEnd"] == 290_000 and values["nextDuration"] == -1

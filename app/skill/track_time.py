@@ -207,12 +207,14 @@ class TrackChangeTracker:
             return entry["offset"] + entry["duration"]
 
 
-# Titles longer than this are shown smaller, so they fit in their lines.
-LONG_TITLE_CHARS = 40
+# Titles longer than these are shown smaller, then smaller again, so they
+# fit in two lines (the page's Audio_PrimaryTextLong and _PrimaryTextLonger).
+TITLE_SIZE_CHARS = (30, 40)
 
 
-def long_title(title):
-    return len(title or "") > LONG_TITLE_CHARS
+def title_size(title):
+    """0 for a short title, 1 for a long one, 2 for a longer one."""
+    return sum(len(title or "") > chars for chars in TITLE_SIZE_CHARS)
 
 
 # Per page (its id), shared by the pages the skill builds (apl.py) and their events.
@@ -228,10 +230,11 @@ def upcoming_commands(queue_end_ms, upcoming):
                  "property": "queueEnd", "value": int(queue_end_ms or 0)}]
     upcoming = upcoming or {}
     for prop, value in (("nextTitle", upcoming.get("title", "")),
-                        ("nextTitleLong", long_title(upcoming.get("title"))),
                         ("nextSecondary", upcoming.get("secondary", "")),
                         ("nextImage", upcoming.get("image", "")),
-                        ("nextDuration", int(upcoming.get("duration_ms") or 0) if upcoming else -1)):
+                        ("nextDuration", int(upcoming.get("duration_ms") or 0) if upcoming else -1),
+                        # Last: pages opened before the third title size lack it.
+                        ("nextTitleSize", title_size(upcoming.get("title")))):
         commands.append({"type": "SetValue", "componentId": "AudioPlayerRoot",
                          "property": prop, "value": value})
     return commands

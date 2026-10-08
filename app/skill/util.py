@@ -351,12 +351,6 @@ def update_apl_metadata(response_builder, info=None, shown=None):
                     "property": "text",
                     "value": info["primaryText"]
                 })
-            commands.append({
-                "type": "SetValue",
-                "componentId": "AudioPlayerRoot",
-                "property": "titleLong",
-                "value": track_time.long_title(info["primaryText"])
-            })
 
         # Update secondary text (artist/album)
         if info.get("secondaryText"):
@@ -395,6 +389,22 @@ def update_apl_metadata(response_builder, info=None, shown=None):
                 "componentId": "AlexaBackground",
                 "property": "backgroundImageSource",
                 "value": background_image
+            })
+
+        # Last: pages opened before the third title size lack these, and
+        # should still take the updates above.
+        if info.get("primaryText"):
+            commands.append({
+                "type": "SetValue",
+                "componentId": "Audio_PrimaryTextLonger",
+                "property": "text",
+                "value": info["primaryText"]
+            })
+            commands.append({
+                "type": "SetValue",
+                "componentId": "AudioPlayerRoot",
+                "property": "titleSize",
+                "value": track_time.title_size(info["primaryText"])
             })
 
         # Send ExecuteCommands directive if we have any commands

@@ -30,8 +30,8 @@ def test_images_the_page_shows_are_not_set_again(monkeypatch):
     shown = {}
     assert ("AlexaBackground", "backgroundImageSource") in _set(_info("a.jpg"), shown, monkeypatch)
     assert _set(_info("a.jpg"), shown, monkeypatch) == [
-        ("Audio_PrimaryText", "text"), ("Audio_PrimaryTextLong", "text"), ("AudioPlayerRoot", "titleLong"),
-        ("Audio_SecondaryText", "text")]
+        ("Audio_PrimaryText", "text"), ("Audio_PrimaryTextLong", "text"), ("Audio_SecondaryText", "text"),
+        ("Audio_PrimaryTextLonger", "text"), ("AudioPlayerRoot", "titleSize")]
 
 
 def test_the_image_the_page_switched_to_itself_is_not_set_again(monkeypatch):
@@ -41,24 +41,29 @@ def test_the_image_the_page_switched_to_itself_is_not_set_again(monkeypatch):
     assert ("Audio_CoverArt", "imageSource") in _set(_info("c.jpg"), shown, monkeypatch)
 
 
-def test_long_titles_have_a_smaller_twin_that_follows_track_changes():
+def test_long_titles_have_smaller_twins_that_follow_track_changes():
     import json, pathlib
     document = json.loads((pathlib.Path(apl.__file__).parent / "apl_document.json").read_text())
     layout = document["layouts"]["AudioPlayer"]
     texts = {c.get("id"): c for c in apl._components(layout) if c.get("type") == "Text"}
-    short, long = texts["Audio_PrimaryText"], texts["Audio_PrimaryTextLong"]
-    assert short["maxLines"] == long["maxLines"] and "fontSize" in long
-    # One shows when the other doesn't.
-    assert short["display"].replace("'none' : 'normal'", "X") == long["display"].replace("'normal' : 'none'", "X")
-    assert {"name": "titleLong", "type": "boolean", "value": "${primaryTextLong}"} in layout["item"][0]["bind"]
+    twins = [texts[i] for i in ("Audio_PrimaryText", "Audio_PrimaryTextLong", "Audio_PrimaryTextLonger")]
+    assert len({t["maxLines"] for t in twins}) == 1 and all("fontSize" in t for t in twins[1:])
+    # Exactly one shows for each size.
+    small = "!(@viewportProfile == @hubLandscapeSmall || @viewportProfile == @hubRoundSmall)"
+    assert twins[0]["display"] == "${titleSize > 0 && %s ? 'none' : 'normal'}" % small
+    for size, twin in enumerate(twins[1:], 1):
+        assert twin["display"] == "${titleSize == %d && %s ? 'normal' : 'none'}" % (size, small)
+    assert {"name": "titleSize", "type": "number", "value": "${primaryTextSize}"} in layout["item"][0]["bind"]
+    assert document["resources"][0]["numbers"]["primarySongTextMaxLines"] == 2
     flip = json.dumps(layout)
-    assert '"componentId": "Audio_PrimaryTextLong", "property": "text", "value": "${nextTitle}"' in flip
-    assert '"property": "titleLong", "value": "${nextTitleLong}"' in flip
+    for twin in ("Audio_PrimaryTextLong", "Audio_PrimaryTextLonger"):
+        assert '"componentId": "%s", "property": "text", "value": "${nextTitle}"' % twin in flip
+    assert '"property": "titleSize", "value": "${nextTitleSize}"' in flip
 
 
-@pytest.mark.parametrize("title, long", [("x" * 40, False), ("x" * 41, True), ("", False)])
-def test_the_page_starts_with_the_title_size_it_needs(monkeypatch, title, long):
+@pytest.mark.parametrize("title, size", [("x" * 30, 0), ("x" * 31, 1), ("x" * 40, 1), ("x" * 41, 2), ("", 0)])
+def test_the_page_starts_with_the_title_size_it_needs(monkeypatch, title, size):
     monkeypatch.setattr(apl, "_get_metadata", lambda device_id=None: {"primaryText": title})
     builder = _Builder()
     apl.add_apl(builder)
-    assert builder.directives[0].document["mainTemplate"]["items"][0]["primaryTextLong"] is long
+    assert builder.directives[0].document["mainTemplate"]["items"][0]["primaryTextSize"] == size

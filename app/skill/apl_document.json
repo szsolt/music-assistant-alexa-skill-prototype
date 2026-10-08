@@ -33,11 +33,12 @@
         "transportLayoutMargins": "0",
         "clockFontSize": "44dp",
         "longTitleFontSize": "40dp",
+        "longerTitleFontSize": "32dp",
         "upNextImageSize": "56dp",
         "upNextWidth": "36%"
       },
       "numbers": {
-        "primarySongTextMaxLines": 3,
+        "primarySongTextMaxLines": 2,
         "secondarySongTextMaxLines": 2
       }
     },
@@ -188,10 +189,10 @@
           "default": 0
         },
         {
-          "name": "primaryTextLong",
-          "description": "The title is long: show it smaller.",
-          "type": "boolean",
-          "default": false
+          "name": "primaryTextSize",
+          "description": "How long the title is: 0 short, 1 long, 2 longer. Longer ones show smaller.",
+          "type": "number",
+          "default": 0
         }
       ],
       "item": [
@@ -231,9 +232,9 @@
               "value": "${startDuration}"
             },
             {
-              "name": "titleLong",
-              "type": "boolean",
-              "value": "${primaryTextLong}"
+              "name": "titleSize",
+              "type": "number",
+              "value": "${primaryTextSize}"
             },
             {
               "name": "nextTitle",
@@ -241,9 +242,9 @@
               "value": ""
             },
             {
-              "name": "nextTitleLong",
-              "type": "boolean",
-              "value": false
+              "name": "nextTitleSize",
+              "type": "number",
+              "value": 0
             },
             {
               "name": "nextSecondary",
@@ -606,7 +607,7 @@
                                 "text": "${primaryText}",
                                 "style": "textStyleDisplay4",
                                 "maxLines": "@primarySongTextMaxLines",
-                                "display": "${titleLong && !(@viewportProfile == @hubLandscapeSmall || @viewportProfile == @hubRoundSmall) ? 'none' : 'normal'}",
+                                "display": "${titleSize > 0 && !(@viewportProfile == @hubLandscapeSmall || @viewportProfile == @hubRoundSmall) ? 'none' : 'normal'}",
                                 "textAlign": "${@viewportProfile != @hubRoundSmall ? 'auto' : 'center'}",
                                 "paddingBottom": "@spacingXSmall"
                               },
@@ -619,7 +620,20 @@
                                 "style": "textStyleDisplay4",
                                 "fontSize": "@longTitleFontSize",
                                 "maxLines": "@primarySongTextMaxLines",
-                                "display": "${titleLong && !(@viewportProfile == @hubLandscapeSmall || @viewportProfile == @hubRoundSmall) ? 'normal' : 'none'}",
+                                "display": "${titleSize == 1 && !(@viewportProfile == @hubLandscapeSmall || @viewportProfile == @hubRoundSmall) ? 'normal' : 'none'}",
+                                "textAlign": "${@viewportProfile != @hubRoundSmall ? 'auto' : 'center'}",
+                                "paddingBottom": "@spacingXSmall"
+                              },
+                              {
+                                "type": "Text",
+                                "id": "Audio_PrimaryTextLonger",
+                                "description": "The title when it is longer still: smaller again.",
+                                "accessibilityLabel": "${primaryText}",
+                                "text": "${primaryText}",
+                                "style": "textStyleDisplay4",
+                                "fontSize": "@longerTitleFontSize",
+                                "maxLines": "@primarySongTextMaxLines",
+                                "display": "${titleSize == 2 && !(@viewportProfile == @hubLandscapeSmall || @viewportProfile == @hubRoundSmall) ? 'normal' : 'none'}",
                                 "textAlign": "${@viewportProfile != @hubRoundSmall ? 'auto' : 'center'}",
                                 "paddingBottom": "@spacingXSmall"
                               },
@@ -758,8 +772,14 @@
                             },
                             {
                               "type": "SetValue",
-                              "property": "titleLong",
-                              "value": "${nextTitleLong}"
+                              "componentId": "Audio_PrimaryTextLonger",
+                              "property": "text",
+                              "value": "${nextTitle}"
+                            },
+                            {
+                              "type": "SetValue",
+                              "property": "titleSize",
+                              "value": "${nextTitleSize}"
                             },
                             {
                               "type": "SetValue",
