@@ -54,3 +54,62 @@ def test_forced_voice_command_does_nothing(page, monkeypatch):
     # "turn off lamp": Alexa's queue command, with no kind word.
     response = lf.VoicePlayHandler().handle(_input("Queue", {"kind": _slot(None), "name": _slot("off lamp")}))
     assert response.output_speech is None and response.should_end_session is None
+
+
+def _session_ended(error_type=None):
+    from ask_sdk_model.session_ended_error import SessionEndedError
+    from ask_sdk_model.session_ended_error_type import SessionEndedErrorType
+    error = SessionEndedError(message="x", object_type=SessionEndedErrorType(error_type)) if error_type else None
+    handler_input = _input("unused")
+    handler_input.request_envelope.request = NS(object_type="SessionEndedRequest", reason=None, error=error)
+    return handler_input
+
+
+@pytest.fixture
+def reopen(monkeypatch):
+    """MA plays on player p, paired with Echo d only; timers fire at once. Yields the resumed Echos."""
+    monkeypatch.setenv("ENABLE_APL", "true")
+    monkeypatch.setattr(lf.threading, "Timer", lambda delay, fn: NS(daemon=False, start=fn))
+    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "p")
+    monkeypatch.setattr(lf.device_mapping, "get_devices_for_player", lambda player_id: ["d"])
+    monkeypatch.setattr(lf.ma_control, "get_queue_state", lambda player_id: ("playing", 61000))
+    monkeypatch.setattr(lf.bell, "has_page", lambda device_id: True)   # the closed page, until swept
+    lp._last_event.clear()
+    resumed = []
+    monkeypatch.setattr(lf, "_resume_for", lambda device_id, position_ms: resumed.append((device_id, position_ms)) or "ok")
+    lf._reopened_at.clear()
+    yield resumed
+    lf._reopened_at.clear()
+
+
+def test_page_alexa_closed_comes_back_once_a_minute(reopen):
+    lf.SkillEventHandler().handle(_session_ended("INTERNAL_SERVICE_ERROR"))
+    assert reopen == [("d", 61000)]                                # where MA is now
+    lf.SkillEventHandler().handle(_session_ended("INTERNAL_SERVICE_ERROR"))
+    assert reopen == [("d", 61000)]
+
+
+def test_page_closed_by_hand_or_by_a_skill_error_stays_closed(reopen):
+    lf.SkillEventHandler().handle(_session_ended())
+    lf.SkillEventHandler().handle(_session_ended("INVALID_RESPONSE"))
+    assert reopen == []
+
+
+def test_page_alexa_closed_stays_closed_when_ma_has_stopped(reopen, monkeypatch):
+    monkeypatch.setattr(lf.ma_control, "get_queue_state", lambda player_id: ("paused", 0))
+    lf.SkillEventHandler().handle(_session_ended("INTERNAL_SERVICE_ERROR"))
+    assert reopen == []
+    # Not counted as a reopen: a later close while MA plays still reopens.
+    monkeypatch.setattr(lf.ma_control, "get_queue_state", lambda player_id: ("playing", 0))
+    lf.SkillEventHandler().handle(_session_ended("INTERNAL_SERVICE_ERROR"))
+    assert reopen == [("d", 0)]
+
+
+def test_page_alexa_closed_stays_closed_for_a_shared_player_or_a_new_page(reopen, monkeypatch):
+    monkeypatch.setattr(lf.device_mapping, "get_devices_for_player", lambda player_id: ["d", "e"])
+    lf.SkillEventHandler().handle(_session_ended("INTERNAL_SERVICE_ERROR"))
+    monkeypatch.setattr(lf.device_mapping, "get_devices_for_player", lambda player_id: ["d"])
+    monkeypatch.setattr(lf.threading, "Timer", lambda delay, fn: NS(daemon=False, start=lambda: (lp.heard_from("d"), fn())))
+    lf.SkillEventHandler().handle(_session_ended("INTERNAL_SERVICE_ERROR"))
+    lp._last_event.clear()
+    assert reopen == []

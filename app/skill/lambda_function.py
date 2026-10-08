@@ -170,6 +170,8 @@ class SkillEventHandler(AbstractRequestHandler):
         if getattr(req, 'reason', None) or getattr(req, 'error', None):
             logger.warning("Session ended: reason=%s error=%s",
                            getattr(req, 'reason', None), getattr(req, 'error', None))
+        if _alexa_broke_off(req) and _supports_apl(handler_input) and util.apl_enabled():
+            _reopen_later(_device_id_from(handler_input))
         return handler_input.response_builder.response
 
 
@@ -286,6 +288,61 @@ def _watch_page(device_id):
         _page_watch[device_id] = timer
     if old:
         old.cancel()
+    timer.start()
+
+
+# Alexa ends the session with its own error when it handles a request
+# itself while the page is open ("set volume to 2"). The page closes and
+# the music stops, though nobody asked for that. The skill asks MA to
+# resend the stream, which brings the page back. The delay lets Alexa
+# finish its own reply first.
+_REOPEN_DELAY_S = 2
+# At most one reopen per this long per Echo, so an Echo that keeps failing
+# doesn't loop.
+_REOPEN_PAUSE_S = 60
+_reopened_at = {}       # device_id -> time.monotonic()
+
+
+def _alexa_broke_off(request):
+    """True if Alexa ended the session with its own error, not one of the skill's."""
+    error = getattr(request, 'error', None)
+    kind = getattr(error, 'object_type', None) or getattr(error, 'type', None)
+    return (getattr(request, 'object_type', None) == "SessionEndedRequest"
+            and getattr(kind, 'value', kind) == "INTERNAL_SERVICE_ERROR")
+
+
+def _reopen_later(device_id):
+    """Have MA resend the stream to device_id after _REOPEN_DELAY_S, if MA still plays to it."""
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        return
+
+    def reopen():
+        # Not bell.has_page: the closed page stays on its books for a while.
+        if live_page.is_live(device_id):
+            logger.info("Alexa closed the page on %s; a new one has come, leaving it", player_id)
+            return
+        state = ma_control.get_queue_state(player_id)
+        if not state or state[0] != "playing":
+            logger.info("Alexa closed the page on %s; MA isn't playing, leaving it", player_id)
+            return
+        if any(d != device_id for d in device_mapping.get_devices_for_player(player_id)):
+            logger.info("Alexa closed the page on %s; its MA player has other Echos, leaving it", player_id)
+            return
+        now = time.monotonic()
+        with _page_watch_lock:
+            last = _reopened_at.get(device_id)
+            if last is not None and now - last < _REOPEN_PAUSE_S:
+                logger.warning("Alexa closed the page on %s again; reopened recently, leaving it", player_id)
+                return
+            _reopened_at[device_id] = now
+        logger.warning("Alexa closed the page on %s while MA plays: reopening it", player_id)
+        # Where MA is now: a position saved at an older pause would rewind.
+        if _resume_for(device_id, state[1]) != "ok":
+            logger.warning("MA did not resend the stream for %s", player_id)
+
+    timer = threading.Timer(_REOPEN_DELAY_S, reopen)
+    timer.daemon = True
     timer.start()
 
 
