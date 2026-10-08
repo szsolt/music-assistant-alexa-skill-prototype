@@ -333,10 +333,15 @@ class UnhandledIntentHandler(AbstractRequestHandler):
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
         logger.info("In UnhandledIntentHandler")
-        _ = handler_input.attributes_manager.request_attributes["_"]
-        handler_input.response_builder.speak(
-            _(data.UNHANDLED_MSG)).set_should_end_session(True)
-        return handler_input.response_builder.response
+        # With the player page open this was most likely meant for Alexa
+        # ("turn off the light"): stay quiet and keep the page.
+        return _ignore(handler_input)
+
+
+def _ignore(handler_input):
+    """Says nothing with the player page open, or that it didn't understand without one."""
+    _ = handler_input.attributes_manager.request_attributes["_"]
+    return _speak(handler_input, None, if_closed=_(data.UNHANDLED_MSG))
 
 
 def _device_id_from(handler_input):
@@ -607,17 +612,22 @@ def _voice_reply(handler_input, run):
     return _speak(handler_input, speech)
 
 
-def _speak(handler_input, speech, commands=()):
-    """A spoken reply that keeps an open player page.
+def _speak(handler_input, speech, commands=(), if_closed=None):
+    """A reply, spoken or silent, that keeps an open player page.
 
     Ending the session closes the page (or leaves it stuck), so with the
     page open the session stays as it is, as for next and previous, and
-    a page without a doorbell gets its next refresh.
+    a page without a doorbell gets its next refresh. speech None says
+    nothing; if_closed is said instead when no page is open.
     """
-    builder = handler_input.response_builder.speak(speech)
+    builder = handler_input.response_builder
     device_id = _device_id_from(handler_input)
     if not (live_page.is_live(device_id) and _supports_apl(handler_input) and util.apl_enabled()):
+        if speech or if_closed:
+            builder.speak(speech or if_closed)
         return builder.set_should_end_session(True).response
+    if speech:
+        builder.speak(speech)
     commands = list(commands)
     if not bell.has_page(device_id):
         commands += util.apl_refresh_commands()
@@ -740,6 +750,11 @@ class VoicePlayHandler(AbstractRequestHandler):
         intent = handler_input.request_envelope.request.intent
         wanted = voice_commands.request_of(intent.name, intent.slots)
         logger.info("Voice command %s: heard %r, by %r", intent.name, wanted["heard"], wanted["artist"])
+        if not wanted["meant"]:
+            # No "play"/"shuffle" or kind word: Alexa forced another request
+            # ("set volume to 2") into this one.
+            logger.info("Voice command %s: no play or kind word, ignoring it", intent.name)
+            return _ignore(handler_input)
         if not wanted["heard"]:
             # Asked once: the session stays open for the answer.
             return (handler_input.response_builder.speak(_(data.WHAT_TO_PLAY_MSG))

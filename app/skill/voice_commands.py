@@ -7,18 +7,23 @@ reads the intent and words the answer.
 
 from . import data
 
-# intent -> (slot with the name, kinds to search in order of preference,
-#            queue option, radio mode)
+# intent -> (slot with the name, kinds to search in order of preference
+#            (None: the kind slot says, "queue the album X"), queue option,
+#            radio mode)
 INTENTS = {
     "PlayArtist": ("artist", ("artist",), "replace", False),
     "PlayAlbum": ("album", ("album",), "replace", False),
     "PlaySong": ("song", ("song",), "replace", False),
     "PlayPlaylist": ("playlist", ("playlist",), "replace", False),
-    "PlayAnything": ("name", ("playlist", "artist", "album", "song"), "replace", False),
     "PlayRadio": ("name", ("artist", "song", "album", "playlist"), "replace", True),
-    "Queue": ("name", ("album", "playlist", "artist", "song"), "add", False),
-    "PlayNext": ("name", ("album", "playlist", "artist", "song"), "next", False),
+    "Queue": ("name", None, "add", False),
+    "PlayNext": ("name", None, "next", False),
+    # Retired, but Amazon's model has it ("play X") until the new one is
+    # uploaded (60 s after a start, or pasted by hand).
+    "PlayAnything": ("name", ("playlist", "artist", "album", "song"), "replace", False),
 }
+# Queue and play next in a model from before the kind slot.
+_ANY_KIND = ("album", "playlist", "artist", "song")
 
 
 # intent -> True to mark as a favourite, False to unmark
@@ -37,33 +42,52 @@ def slot_text(slots, name):
     slot = (slots or {}).get(name)
     if slot is None:
         return None
+    return slot_match(slots, name) or slot.value or None
+
+
+def slot_match(slots, name):
+    """The listed value Alexa matched for the slot called name, or None if the words aren't in the list."""
+    slot = (slots or {}).get(name)
     try:
         for authority in slot.resolutions.resolutions_per_authority:
             if authority.status.code.value == "ER_SUCCESS_MATCH" and authority.values:
                 return authority.values[0].value.name
     except AttributeError:
         pass
-    return slot.value or None
+    return None
 
 
 def request_of(intent_name, slots):
     """What to find and play for the intent, or None if it isn't a voice command.
 
-    Returns a dict: heard (None if nothing usable was heard), artist (from
-    "by X"), kinds, option ("replace", "add", "next"), shuffle (True, False,
-    or None to leave it) and radio.
+    Returns a dict: meant (False if the play or kind word is missing, as
+    when Alexa forces "turn off the light" into a music command), heard
+    (None if nothing usable was heard), artist (from "by X"), kinds,
+    option ("replace", "add", "next"), shuffle (True, False, or None to
+    leave it) and radio.
     """
     if intent_name not in INTENTS:
         return None
     slot, kinds, option, radio = INTENTS[intent_name]
     heard = slot_text(slots, slot)
-    if not heard and intent_name in ("Queue", "PlayNext"):
-        heard, kinds = slot_text(slots, "song"), ("song",)
+    meant = True
+    song = slot_text(slots, "song")
+    if kinds is None and "kind" not in (slots or {}):
+        kinds = _ANY_KIND
+        if not heard:
+            heard, kinds = song, ("song",)
+    elif kinds is None:
+        kind = slot_match(slots, "kind")
+        if kind == "song":
+            heard = song or heard
+        elif not kind and song:
+            heard, kind = song, "song"
+        meant, kinds = kind is not None, (kind,) if kind else ()
     shuffle = None
     if option == "replace" and not radio:
-        mode = (slot_text(slots, "mode") or "").lower()
-        shuffle = "shuffle" in mode or mode == "mix"
-    return {"heard": heard, "artist": slot_text(slots, "artist"), "kinds": kinds,
+        mode = slot_match(slots, "mode")
+        meant, shuffle = mode is not None, mode == "shuffle"
+    return {"meant": meant, "heard": heard, "artist": slot_text(slots, "artist"), "kinds": kinds,
             "option": option, "shuffle": shuffle, "radio": radio}
 
 

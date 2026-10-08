@@ -104,6 +104,8 @@ Notes:
 
 "Alexa, ask music assistant to play the album Abbey Road" and similar phrases need your library's names in the skill's model at Amazon. The skill reads them from MA once a day.
 
+Each phrase says what kind of thing to play: "play artist X", "shuffle album X", "play song X", "play playlist X", "queue album X", "play song X next", "play radio for X". While the player screen is open, Alexa sends everything you say to the skill. Without the kind word, "turn off the light" could queue a song. The skill ignores such requests and keeps playing.
+
 To upload them automatically:
 
 1. In the [Amazon developer console](https://developer.amazon.com/loginwithamazon/console/site/lwa/overview.html), create a Login with Amazon security profile. Note its client id and secret.

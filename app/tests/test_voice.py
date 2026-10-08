@@ -79,6 +79,7 @@ def test_merge_keeps_invocation_and_replaces_ours():
         "invocationName": "music assistant",
         "intents": [{"name": "PlayAudio", "samples": ["play"]},
                     {"name": "PlayArtist", "samples": ["old"]},
+                    {"name": "PlayAnything", "samples": ["{mode} {name}"]},
                     {"name": "AMAZON.NextIntent", "samples": []}],
         "types": [{"name": "MA_ARTIST", "values": []}, {"name": "OTHER", "values": []}]}}}
     template = voice_model.template_for("en-AU")
@@ -90,8 +91,13 @@ def test_merge_keeps_invocation_and_replaces_ours():
     assert "AMAZON.ShuffleOnIntent" in names and "PlayAudio" in names
     # MA's spoken fallback says "ask ... to play audio": that must stay PlayAudio.
     assert "play audio" in next(i for i in language["intents"] if i["name"] == "PlayAudio")["samples"]
-    assert [t["name"] for t in language["types"]] == ["OTHER", "MA_MODE", "MA_FAVORITE_KIND", "MA_ARTIST"]
+    assert [t["name"] for t in language["types"]] == ["OTHER", "MA_MODE", "MA_KIND", "MA_FAVORITE_KIND", "MA_ARTIST"]
     assert base["interactionModel"]["languageModel"]["intents"][1]["samples"] == ["old"]
+    # The old "play X" goes; requests for Alexa teach the fallback.
+    assert "PlayAnything" not in names
+    fallback = next(i for i in language["intents"] if i["name"] == "AMAZON.FallbackIntent")
+    assert "set volume to two" in fallback["samples"]
+    assert language["modelConfiguration"]["fallbackIntentSensitivity"] == {"level": "HIGH"}
 
 
 def test_template_uses_only_known_slot_types():
@@ -104,7 +110,7 @@ def test_template_uses_only_known_slot_types():
         for sample in intent["samples"]:
             assert {part.split("}")[0] for part in sample.split("{")[1:]} <= slots, sample
     assert voice_model.template_for("de-DE") is None
-    assert set(voice_commands.INTENTS) <= {i["name"] for i in template["intents"]}
+    assert set(voice_commands.INTENTS) <= {i["name"] for i in template["intents"]} | set(template["retiredIntents"])
 
 
 def _slot(value, resolved=None):
@@ -117,24 +123,61 @@ def _slot(value, resolved=None):
 
 def test_request_prefers_the_resolved_name_and_reads_shuffle():
     wanted = voice_commands.request_of("PlayAlbum", {
-        "album": _slot("abby road", "Abbey Road"), "mode": _slot("shuffle"), "artist": _slot(None)})
-    assert wanted == {"heard": "Abbey Road", "artist": None, "kinds": ("album",),
+        "album": _slot("abby road", "Abbey Road"), "mode": _slot("mix", "shuffle"), "artist": _slot(None)})
+    assert wanted == {"meant": True, "heard": "Abbey Road", "artist": None, "kinds": ("album",),
                       "option": "replace", "shuffle": True, "radio": False}
-    assert voice_commands.request_of("PlayArtist", {"artist": _slot("x"), "mode": _slot("play")})["shuffle"] is False
+    played = voice_commands.request_of("PlayArtist", {"artist": _slot("x"), "mode": _slot("start", "play")})
+    assert played["meant"] and played["shuffle"] is False
     radio = voice_commands.request_of("PlayRadio", {"name": _slot("x")})
-    assert radio["radio"] and radio["shuffle"] is None
-    queued = voice_commands.request_of("Queue", {"name": _slot(None), "song": _slot("hey jude")})
-    assert queued["heard"] == "hey jude" and queued["kinds"] == ("song",) and queued["option"] == "add"
+    assert radio["meant"] and radio["radio"] and radio["shuffle"] is None
+    queued = voice_commands.request_of("Queue", {"kind": _slot(None), "name": _slot(None), "song": _slot("hey jude")})
+    assert queued["meant"] and queued["heard"] == "hey jude" and queued["kinds"] == ("song",)
+    assert queued["option"] == "add"
+    album = voice_commands.request_of("Queue", {"kind": _slot("album", "album"), "name": _slot("abbey road")})
+    assert album["meant"] and album["heard"] == "abbey road" and album["kinds"] == ("album",)
+    # "queue track X" fills the kind, not the song.
+    track = voice_commands.request_of("Queue", {"kind": _slot("track", "song"), "name": _slot("hey jude"),
+                                                "song": _slot(None)})
+    assert track["meant"] and track["heard"] == "hey jude" and track["kinds"] == ("song",)
     assert voice_commands.request_of("AMAZON.NextIntent", {}) is None
+
+
+def test_request_without_its_kind_or_play_word_is_not_meant():
+    # What Alexa made of "turn off lamp" and "set volume to 2" with the player page open.
+    assert not voice_commands.request_of("Queue", {"kind": _slot(None), "name": _slot("off lamp")})["meant"]
+    assert not voice_commands.request_of("Queue", {"kind": _slot("volume"), "name": _slot("to two")})["meant"]
+    assert not voice_commands.request_of("PlayNext", {"kind": _slot(None), "name": _slot("off lamp")})["meant"]
+    assert not voice_commands.request_of("PlaySong", {"mode": _slot("set"), "song": _slot("volume to 2")})["meant"]
+    assert not voice_commands.request_of("PlayArtist", {"artist": _slot("lamp")})["meant"]
+
+
+def test_request_from_the_model_before_kind_words():
+    # Amazon keeps the old model until the new one is uploaded.
+    queued = voice_commands.request_of("Queue", {"name": _slot("abbey road"), "song": _slot(None)})
+    assert queued["meant"] and queued["heard"] == "abbey road" and len(queued["kinds"]) == 4
+    song = voice_commands.request_of("PlayNext", {"name": _slot(None), "song": _slot("hey jude")})
+    assert song["meant"] and song["heard"] == "hey jude" and song["kinds"] == ("song",)
+    played = voice_commands.request_of("PlayAnything", {"name": _slot("abbey road"), "mode": _slot("play", "play")})
+    assert played["meant"] and played["option"] == "replace"
 
 
 def test_answers():
     _ = lambda s: s
     match = {"kind": "album", "name": "Abbey Road", "artist": "The Beatles"}
-    wanted = voice_commands.request_of("PlayAlbum", {"album": _slot("x"), "mode": _slot("shuffle")})
+    wanted = voice_commands.request_of("PlayAlbum", {"album": _slot("x"), "mode": _slot("shuffle", "shuffle")})
     assert voice_commands.answer(_, wanted, match) == "Shuffling Abbey Road by The Beatles"
-    wanted = voice_commands.request_of("PlayNext", {"name": _slot("x")})
+    wanted = voice_commands.request_of("PlayNext", {"kind": _slot("artist", "artist"), "name": _slot("x")})
     assert voice_commands.answer(_, wanted, {"kind": "artist", "name": "X", "artist": ""}) == "Playing X next"
+
+
+def test_free_names_come_after_their_kind():
+    """Every sample with a free name also has a kind word, so requests meant for Alexa don't match it."""
+    template = voice_model.template_for("en-AU")
+    kind_words = ("artist", "album", "song", "track", "playlist", "radio", "{kind}", " like ")
+    for intent in template["intents"]:
+        for sample in intent["samples"]:
+            if any(f"{{{slot}}}" in sample for slot in ("name", "artist", "album", "song", "playlist")):
+                assert any(word in sample for word in kind_words), sample
 
 
 def test_template_is_small():

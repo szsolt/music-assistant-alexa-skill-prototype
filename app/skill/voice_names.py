@@ -18,7 +18,8 @@ MAX_VALUE_CHARS = 140
 MAX_BYTES = 1_200_000
 MAX_VALUES = 45_000
 
-# Kinds in budget order. MA_NAME ("play X") holds every kind but songs.
+# Kinds in budget order. MA_NAME (the name in "queue album X" and radio)
+# holds every kind but songs.
 KINDS = ("playlist", "artist", "album", "song")
 SLOT_TYPES = {"playlist": "MA_PLAYLIST", "artist": "MA_ARTIST",
               "album": "MA_ALBUM", "song": "MA_SONG"}

@@ -1,5 +1,5 @@
 {
- "_comment": "Voice commands, merged into each English locale's model by skill/model_upload.py. The MA_* types are filled from Music Assistant's library at upload time.",
+ "_comment": "Voice commands, merged into each English locale's model by skill/model_upload.py. The MA_* types are filled from Music Assistant's library at upload time. Every phrase with a free name says its kind (artist, album, song, playlist), so other requests to Alexa don't land on them.",
  "intents": [
   {
    "name": "PlayArtist",
@@ -15,12 +15,7 @@
    ],
    "samples": [
     "{mode} artist {artist}",
-    "{mode} the artist {artist}",
-    "{mode} music by {artist}",
-    "{mode} songs by {artist}",
-    "{mode} something by {artist}",
-    "{mode} {artist} songs",
-    "{mode} {artist} music"
+    "{mode} the artist {artist}"
    ]
   },
   {
@@ -69,8 +64,8 @@
     "{mode} the song {song}",
     "{mode} the song {song} by {artist}",
     "{mode} song {song} by {artist}",
-    "{mode} the track {song}",
-    "{mode} {song} by {artist}"
+    "{mode} track {song}",
+    "{mode} the track {song}"
    ]
   },
   {
@@ -92,22 +87,6 @@
     "{mode} my {playlist} playlist",
     "{mode} the {playlist} playlist",
     "{mode} {playlist} playlist"
-   ]
-  },
-  {
-   "name": "PlayAnything",
-   "slots": [
-    {
-     "name": "mode",
-     "type": "MA_MODE"
-    },
-    {
-     "name": "name",
-     "type": "MA_NAME"
-    }
-   ],
-   "samples": [
-    "{mode} {name}"
    ]
   },
   {
@@ -145,13 +124,19 @@
     "play something like {name}",
     "start a radio for {name}",
     "play {name} radio",
-    "start {name} radio"
+    "start {name} radio",
+    "play radio for {name}",
+    "start radio for {name}"
    ]
   },
   {
    "name": "Queue",
    "slots": [
     {
+     "name": "kind",
+     "type": "MA_KIND"
+    },
+    {
      "name": "name",
      "type": "MA_NAME"
     },
@@ -161,21 +146,26 @@
     }
    ],
    "samples": [
-    "queue {name}",
-    "add {name} to the queue",
-    "add {name} to my queue",
-    "add {name}",
+    "queue {kind} {name}",
+    "queue the {kind} {name}",
+    "add {kind} {name} to the queue",
+    "add the {kind} {name} to the queue",
+    "add the {kind} {name} to my queue",
+    "queue song {song}",
     "queue the song {song}",
     "add the song {song}",
-    "add the song {song} to the queue",
-    "queue the album {name}",
-    "add the album {name} to the queue"
+    "add song {song} to the queue",
+    "add the song {song} to the queue"
    ]
   },
   {
    "name": "PlayNext",
    "slots": [
     {
+     "name": "kind",
+     "type": "MA_KIND"
+    },
+    {
      "name": "name",
      "type": "MA_NAME"
     },
@@ -185,11 +175,12 @@
     }
    ],
    "samples": [
-    "play {name} next",
+    "play {kind} {name} next",
+    "play the {kind} {name} next",
+    "queue the {kind} {name} next",
+    "play song {song} next",
     "play the song {song} next",
-    "play the album {name} next",
-    "put {name} next",
-    "queue {name} next"
+    "queue the song {song} next"
    ]
   },
   {
@@ -276,12 +267,32 @@
   "AMAZON.LoopOnIntent",
   "AMAZON.LoopOffIntent",
   "AMAZON.NextIntent",
-  "AMAZON.PreviousIntent"
+  "AMAZON.PreviousIntent",
+  "AMAZON.FallbackIntent"
  ],
  "extraSamples": {
   "PlayAudio": [
    "play audio",
    "play audio please"
+  ],
+  "AMAZON.FallbackIntent": [
+   "turn on the light",
+   "turn off the light",
+   "turn on the lights",
+   "turn off the lights",
+   "turn off the tv",
+   "switch off the fan",
+   "set volume to two",
+   "set the volume to five",
+   "volume up",
+   "volume down",
+   "louder",
+   "quieter",
+   "set a timer for ten minutes",
+   "set an alarm for seven",
+   "what time is it",
+   "what's the weather",
+   "what's the temperature"
   ]
  },
  "types": [
@@ -306,6 +317,34 @@
        "play shuffled",
        "mix"
       ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "MA_KIND",
+   "values": [
+    {
+     "name": {
+      "value": "artist"
+     }
+    },
+    {
+     "name": {
+      "value": "album"
+     }
+    },
+    {
+     "name": {
+      "value": "song",
+      "synonyms": [
+       "track"
+      ]
+     }
+    },
+    {
+     "name": {
+      "value": "playlist"
      }
     }
    ]
@@ -341,5 +380,9 @@
     }
    ]
   }
- ]
+ ],
+ "retiredIntents": [
+  "PlayAnything"
+ ],
+ "fallbackSensitivity": "HIGH"
 }
