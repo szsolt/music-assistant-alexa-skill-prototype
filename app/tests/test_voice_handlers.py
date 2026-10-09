@@ -209,3 +209,11 @@ def test_play_is_someones_only_when_ma_is_paused_and_sent_nothing(monkeypatch, s
     import shared_store
     monkeypatch.setattr(shared_store, "sent_since", lambda player_id, seconds: sent)
     assert lf._said_play("d") is said
+
+
+def test_said_play_resumes_ma_on_the_open_page(monkeypatch):
+    monkeypatch.setattr(lf.device_mapping, "is_another_echos_stream", lambda *a: False)
+    monkeypatch.setattr(lf, "_said_play", lambda device_id: True)
+    resumed = object()
+    monkeypatch.setattr(lf, "_stream_reply", lambda handler_input, send: resumed)
+    assert lf.LaunchRequestOrPlayAudioHandler().handle(_input("PlayAudio")) is resumed

@@ -201,12 +201,17 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
         # position, paused or playing. Replaying the stored URL makes MA
         # restart that flow where it first started it, while MA's clock (and
         # with it track time and the next title) runs on from the old start.
-        # PlayAudio is MA itself sending a new stream: play that. Unless MA
-        # sent none just now and is paused: then someone said "play", and
-        # the page alone would play while MA stays paused.
-        if ((is_request_type("LaunchRequest")(handler_input) or _said_play(device_id))
+        # PlayAudio is MA itself sending a new stream: play that.
+        if (is_request_type("LaunchRequest")(handler_input)
                 and _resume_through_ma(handler_input) == "ok"):
             return handler_input.response_builder.set_should_end_session(True).response
+        # Unless MA sent none just now and is paused: then someone said
+        # "play", and the page alone would play while MA stays paused. Resume
+        # MA as for "resume", on the open page.
+        if not is_request_type("LaunchRequest")(handler_input) and _said_play(device_id):
+            result = _stream_reply(handler_input, lambda: _resume_through_ma(handler_input))
+            if not isinstance(result, str):
+                return result
         request = handler_input.request_envelope.request
         url, _audio = _get_stream_url(request)
         logger.info("URL from util.audio_data: %s", url)
@@ -248,8 +253,8 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
         return response
 
 
-# MA speaks "play audio" to the Echo within a few seconds of sending its stream.
-_MA_PLAY_SECONDS = 15
+# MA speaks "play audio" to the Echo about a second after sending its stream.
+_MA_PLAY_SECONDS = 5
 
 
 def _said_play(device_id):
