@@ -288,6 +288,40 @@
     "move playback to {player}",
     "move the music over to {player}"
    ]
+  },
+  {
+   "name": "SleepTimer",
+   "slots": [
+    {
+     "name": "duration",
+     "type": "AMAZON.DURATION"
+    }
+   ],
+   "samples": [
+    "stop in {duration}",
+    "stop the music in {duration}",
+    "stop music in {duration}",
+    "stop playing in {duration}",
+    "pause in {duration}",
+    "pause the music in {duration}",
+    "turn off the music in {duration}",
+    "sleep in {duration}",
+    "set a sleep timer for {duration}",
+    "set the sleep timer for {duration}",
+    "sleep timer for {duration}",
+    "sleep timer {duration}"
+   ]
+  },
+  {
+   "name": "CancelSleepTimer",
+   "slots": [],
+   "samples": [
+    "cancel the sleep timer",
+    "cancel sleep timer",
+    "turn off the sleep timer",
+    "stop the sleep timer",
+    "remove the sleep timer"
+   ]
   }
  ],
  "builtInIntents": [

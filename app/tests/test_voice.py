@@ -109,7 +109,7 @@ def test_merge_keeps_invocation_and_replaces_ours():
 def test_template_uses_only_known_slot_types():
     template = voice_model.template_for("en-US")
     known = set(voice_names.SLOT_TYPES.values()) | {voice_names.ANY_TYPE, voice_names.PLAYER_TYPE} | {t["name"] for t in template["types"]}
-    used = {s["type"] for i in template["intents"] for s in i["slots"]}
+    used = {s["type"] for i in template["intents"] for s in i["slots"] if not s["type"].startswith("AMAZON.")}
     assert used <= known
     for intent in template["intents"]:
         slots = {s["name"] for s in intent["slots"]}

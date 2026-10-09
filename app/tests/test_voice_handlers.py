@@ -174,3 +174,29 @@ def test_a_failed_button_state_leaves_the_others(monkeypatch):
         raise KeyError("song")
     monkeypatch.setattr(lf.ma_voice, "favorites", broken)
     assert lf._start_buttons("d") == {"shuffleOn": 0, "repeatMode": 0}
+
+
+@pytest.fixture
+def sleep(monkeypatch):
+    """Echo d plays MA player p. Yields the timers the skill started."""
+    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "p")
+    started = []
+    monkeypatch.setattr(lf.sleep_timer, "start", lambda device_id, seconds, on_due: started.append((device_id, seconds)))
+    yield started
+
+
+def test_sleep_timer_starts_and_says_when(sleep):
+    response = lf.SleepTimerHandler().handle(_input("SleepTimer", {"duration": _slot("PT1H30M")}))
+    assert sleep == [("d", 5400)]
+    assert "1 hour and 30 minutes" in response.output_speech.ssml
+
+
+def test_sleep_timer_without_a_length_asks_for_one(sleep):
+    response = lf.SleepTimerHandler().handle(_input("SleepTimer", {"duration": _slot(None)}))
+    assert sleep == [] and "How long" in response.output_speech.ssml
+
+
+def test_cancel_sleep_timer_says_if_there_was_none(monkeypatch):
+    monkeypatch.setattr(lf.sleep_timer, "cancel", lambda device_id: False)
+    response = lf.CancelSleepTimerHandler().handle(_input("CancelSleepTimer"))
+    assert "no sleep timer" in response.output_speech.ssml

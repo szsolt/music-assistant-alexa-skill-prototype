@@ -15,7 +15,7 @@ from ask_sdk_core.utils import is_request_type, is_intent_name
 from ask_sdk_core.handler_input import HandlerInput
 from ask_sdk_model import Response
 
-from . import (data, util, device_mapping, live_page, ma_control, track_time, bell, apl, ma_voice,
+from . import (data, util, device_mapping, live_page, ma_control, track_time, bell, apl, ma_voice, sleep_timer,
                voice_commands, voice_match)
 
 sb = StandardSkillBuilder()
@@ -915,6 +915,40 @@ class MoveMusicHandler(AbstractRequestHandler):
             ma_voice.move(player_id, players[name])
             return util.stop(_(data.MOVING_MSG).format(name), handler_input.response_builder)
         return _voice_reply(handler_input, run)
+
+class SleepTimerHandler(AbstractRequestHandler):
+    """Pause MA after a while: "stop in 30 minutes"."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        return is_intent_name("SleepTimer")(handler_input)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        _ = handler_input.attributes_manager.request_attributes["_"]
+        slot = (handler_input.request_envelope.request.intent.slots or {}).get("duration")
+        seconds = sleep_timer.parse_duration(slot and slot.value)
+        logger.info("Sleep timer: heard %r", slot and slot.value)
+        if not seconds:
+            return _speak(handler_input, _(data.SLEEP_HOW_LONG_MSG))
+        device_id = _device_id_from(handler_input)
+
+        def run(player_id):
+            sleep_timer.start(device_id, seconds, lambda device_id: _sync_device_to_ma(device_id, "pause"))
+            return _(data.SLEEP_SET_MSG).format(sleep_timer.spoken(seconds))
+        return _voice_reply(handler_input, run)
+
+
+class CancelSleepTimerHandler(AbstractRequestHandler):
+    """"Cancel the sleep timer"."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        return is_intent_name("CancelSleepTimer")(handler_input)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        _ = handler_input.attributes_manager.request_attributes["_"]
+        cancelled = sleep_timer.cancel(_device_id_from(handler_input))
+        return _speak(handler_input, _(data.SLEEP_CANCELLED_MSG if cancelled else data.NO_SLEEP_TIMER_MSG))
 
 # ###################################################################
 
@@ -1849,6 +1883,8 @@ sb.add_request_handler(FavoriteHandler())
 sb.add_request_handler(PlayRandomHandler())
 sb.add_request_handler(WhatsPlayingHandler())
 sb.add_request_handler(MoveMusicHandler())
+sb.add_request_handler(SleepTimerHandler())
+sb.add_request_handler(CancelSleepTimerHandler())
 sb.add_request_handler(LoopOrShuffleIntentHandler())
 sb.add_request_handler(PlaybackStartedHandler())
 sb.add_request_handler(PlaybackFinishedHandler())
