@@ -246,14 +246,15 @@ def upcoming_commands(queue_end_ms, upcoming):
                         ("nextImage", upcoming.get("image", "")),
                         ("nextDuration", int(upcoming.get("duration_ms") or 0) if upcoming else -1),
                         ("nextTitleSize", title_size(upcoming.get("title"))),
-                        ("nextAlbum", upcoming.get("album", ""))):
+                        ("nextAlbum", upcoming.get("album", "")),
+                        ("nextQuality", upcoming.get("quality", ""))):
         commands.append({"type": "SetValue", "componentId": "AudioPlayerRoot",
                          "property": prop, "value": value})
     return commands
 
 
-# Pages opened before the third title size or the album line lack these.
-_NEW_PAGE_ONLY = ("nextTitleSize", "nextAlbum")
+# Pages opened before the third title size, the album line or the quality lack these.
+_NEW_PAGE_ONLY = ("nextTitleSize", "nextAlbum", "quality", "nextQuality")
 
 
 def new_page_only_last(commands):
@@ -266,7 +267,7 @@ def new_page_only_last(commands):
 
 
 def set_track_time_commands(offset_ms, duration_ms, shown_ms=None, queue_end_ms=None,
-                            upcoming=None):
+                            upcoming=None, quality=""):
     """APL SetValue commands for the page's trackOffset and trackDuration.
 
     offset_ms None leaves the offset as it is; duration_ms None or 0 shows
@@ -274,9 +275,10 @@ def set_track_time_commands(offset_ms, duration_ms, shown_ms=None, queue_end_ms=
     directly, for a paused page: the slider only follows the video's time
     updates, and a paused video sends none. queue_end_ms: where MA's queue
     ends in the video, on its last track (the page stops there); else 0.
-    upcoming: the next track (title, secondary, album, image, duration_ms), which
-    the page shows by itself at the track's end, before the skill's next
-    update arrives; None: nothing to switch to.
+    upcoming: the next track (title, secondary, album, image, duration_ms,
+    quality), which the page shows by itself at the track's end, before the
+    skill's next update arrives; None: nothing to switch to. quality: the
+    current track's file, e.g. "FLAC 16/44.1"; "" shows none.
     """
     queue_end, *following = upcoming_commands(queue_end_ms, upcoming)
     commands = [queue_end]
@@ -286,6 +288,8 @@ def set_track_time_commands(offset_ms, duration_ms, shown_ms=None, queue_end_ms=
     commands.append({"type": "SetValue", "componentId": "AudioPlayerRoot",
                      "property": "trackDuration", "value": int(duration_ms or 0)})
     commands += following
+    commands.append({"type": "SetValue", "componentId": "AudioPlayerRoot",
+                     "property": "quality", "value": quality or ""})
     if shown_ms is not None:
         commands.append({"type": "SetValue", "componentId": "slider",
                          "property": "progressValue", "value": max(int(shown_ms), 0)})

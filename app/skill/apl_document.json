@@ -293,6 +293,16 @@
               "value": ""
             },
             {
+              "name": "quality",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "name": "nextQuality",
+              "type": "string",
+              "value": ""
+            },
+            {
               "name": "nextImage",
               "type": "string",
               "value": ""
@@ -847,6 +857,11 @@
                             },
                             {
                               "type": "SetValue",
+                              "property": "quality",
+                              "value": "${nextQuality}"
+                            },
+                            {
+                              "type": "SetValue",
                               "when": "${nextImage != ''}",
                               "componentId": "Audio_CoverArt",
                               "property": "imageSource",
@@ -1014,6 +1029,21 @@
                                 "metadataPosition": "above_right",
                                 "width": "100%",
                                 "theme": "${viewport.theme}"
+                              },
+                              {
+                                "type": "Text",
+                                "id": "Audio_QualityText",
+                                "description": "The file's quality, e.g. FLAC 16/44.1: left in the time's row, as AlexaSlider places the time on the right. Dimmer than the time.",
+                                "text": "${quality}",
+                                "position": "absolute",
+                                "top": 0,
+                                "left": "${@sliderRippleSize / 2}",
+                                "width": "50%",
+                                "maxLines": 1,
+                                "style": "@sliderTimeStampTestStyle",
+                                "fontWeight": "@fontWeightMedium",
+                                "opacity": 0.5,
+                                "display": "${quality != '' && @viewportProfile != @hubRoundSmall ? 'normal' : 'none'}"
                               },
                               {
                                 "type": "Container",

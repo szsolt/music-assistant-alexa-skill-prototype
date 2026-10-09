@@ -54,16 +54,19 @@ def test_track_key_uses_stream_and_titles():
 def test_set_track_time_commands():
     cmds = tt.set_track_time_commands(388_000, 215_000)
     assert [(c["property"], c["value"]) for c in cmds] == [("queueEnd", 0), ("trackOffset", 388_000), ("trackDuration", 215_000),
-        ("nextTitle", ""), ("nextSecondary", ""), ("nextImage", ""), ("nextDuration", -1), ("nextTitleSize", 0), ("nextAlbum", "")]
+        ("nextTitle", ""), ("nextSecondary", ""), ("nextImage", ""), ("nextDuration", -1), ("nextTitleSize", 0), ("nextAlbum", ""),
+        ("nextQuality", ""), ("quality", "")]
     assert all(c["componentId"] == "AudioPlayerRoot" for c in cmds)
 
 
 def test_commands_carry_the_next_track():
-    upcoming = {"title": "B", "secondary": "Artist", "album": "Album", "image": "https://i/b", "duration_ms": 180_000}
-    cmds = tt.set_track_time_commands(0, 215_000, upcoming=upcoming)
-    assert [(c["property"], c["value"]) for c in cmds][-6:] == [
+    upcoming = {"title": "B", "secondary": "Artist", "album": "Album", "image": "https://i/b", "duration_ms": 180_000,
+                "quality": "MP3 192k"}
+    cmds = tt.set_track_time_commands(0, 215_000, upcoming=upcoming, quality="FLAC 16/44.1")
+    assert [(c["property"], c["value"]) for c in cmds][-8:] == [
         ("nextTitle", "B"), ("nextSecondary", "Artist"), ("nextImage", "https://i/b"),
-        ("nextDuration", 180_000), ("nextTitleSize", 0), ("nextAlbum", "Album")]
+        ("nextDuration", 180_000), ("nextTitleSize", 0), ("nextAlbum", "Album"),
+        ("nextQuality", "MP3 192k"), ("quality", "FLAC 16/44.1")]
     unknown_length = dict(upcoming, duration_ms=0)
     assert {"type": "SetValue", "componentId": "AudioPlayerRoot", "property": "nextDuration", "value": 0} in \
         tt.set_track_time_commands(0, 215_000, upcoming=unknown_length)
@@ -72,7 +75,8 @@ def test_commands_carry_the_next_track():
 def test_set_track_time_commands_unknown():
     cmds = tt.set_track_time_commands(None, None)
     assert [(c["property"], c["value"]) for c in cmds] == [("queueEnd", 0), ("trackDuration", 0),
-                                                                 ("nextTitle", ""), ("nextSecondary", ""), ("nextImage", ""), ("nextDuration", -1), ("nextTitleSize", 0), ("nextAlbum", "")]
+                                                                 ("nextTitle", ""), ("nextSecondary", ""), ("nextImage", ""), ("nextDuration", -1), ("nextTitleSize", 0), ("nextAlbum", ""),
+                                                                 ("nextQuality", ""), ("quality", "")]
 
 
 def test_offset_prefers_previous_track_end():
@@ -157,9 +161,9 @@ def test_resume_position():
 
 def test_commands_set_slider_when_paused():
     cmds = tt.set_track_time_commands(-34_760, 326_000, shown_ms=34_760)
-    assert cmds[-3] == {"type": "SetValue", "componentId": "slider",
+    assert cmds[-5] == {"type": "SetValue", "componentId": "slider",
                         "property": "progressValue", "value": 34_760}
-    assert len(tt.set_track_time_commands(-34_760, 326_000)) == 9
+    assert len(tt.set_track_time_commands(-34_760, 326_000)) == 11
 
 
 def test_queue_end_only_on_the_last_track():
@@ -212,10 +216,12 @@ def test_tracker_page_it_did_not_start_has_no_previous_end():
 
 
 def test_upcoming_commands_after_repeat_or_shuffle():
-    upcoming = {"title": "B", "secondary": "Artist", "album": "Album", "image": "https://i/b", "duration_ms": 180_000}
+    upcoming = {"title": "B", "secondary": "Artist", "album": "Album", "image": "https://i/b", "duration_ms": 180_000,
+                "quality": "FLAC 16/44.1"}
     values = {c["property"]: c["value"] for c in tt.upcoming_commands(None, upcoming)}
     assert values == {"queueEnd": 0, "nextTitle": "B", "nextTitleSize": 0, "nextSecondary": "Artist",
-                      "nextImage": "https://i/b", "nextDuration": 180_000, "nextAlbum": "Album"}
+                      "nextImage": "https://i/b", "nextDuration": 180_000, "nextAlbum": "Album",
+                      "nextQuality": "FLAC 16/44.1"}
     long = dict(upcoming, title="Transit Blues I. (Budapest - Rotterdam), live")
     assert {c["property"]: c["value"] for c in tt.upcoming_commands(None, long)}["nextTitleSize"] == 2
     # nothing follows: the page stops at the queue's end, and shows no next song
@@ -236,4 +242,5 @@ def test_tracker_set_last():
 def test_commands_older_pages_lack_come_last():
     cmds = tt.new_page_only_last(tt.set_track_time_commands(0, 215_000, shown_ms=0)
                                  + [{"type": "SetValue", "componentId": "AudioPlayerRoot", "property": "shuffleOn", "value": 1}])
-    assert [c["property"] for c in cmds][-3:] == ["shuffleOn", "nextTitleSize", "nextAlbum"]
+    assert [c["property"] for c in cmds][-5:] == ["shuffleOn", "nextTitleSize", "nextAlbum",
+                                                  "nextQuality", "quality"]

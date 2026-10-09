@@ -104,3 +104,17 @@ def test_a_track_with_no_artist_or_album_clears_the_last_ones(monkeypatch):
     util.update_apl_metadata(builder, {"primaryText": "Radio"}, {})
     values = {(c["componentId"], c["property"]): c["value"] for d in builder.directives for c in d.commands}
     assert values[("Audio_SecondaryText", "text")] == "" and values[("AudioPlayerRoot", "album")] == ""
+
+
+def test_quality_sits_left_of_the_time_and_follows_track_changes():
+    import json, pathlib
+    document = json.loads((pathlib.Path(apl.__file__).parent / "apl_document.json").read_text())
+    layout = document["layouts"]["AudioPlayer"]
+    texts = {c.get("id"): c for c in apl._components(layout) if c.get("type") == "Text"}
+    label = texts["Audio_QualityText"]
+    assert label["text"] == "${quality}" and label["position"] == "absolute" and label["top"] == 0
+    assert label["style"] == "@sliderTimeStampTestStyle"      # as AlexaSlider draws the time
+    binds = layout["item"][0]["bind"]
+    assert {"name": "quality", "type": "string", "value": ""} in binds
+    assert {"name": "nextQuality", "type": "string", "value": ""} in binds
+    assert '"property": "quality", "value": "${nextQuality}"' in json.dumps(layout)

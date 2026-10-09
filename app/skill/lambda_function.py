@@ -1182,7 +1182,8 @@ def _track_time_commands(handler_input, arguments, page_key, info):
         return []
     device_id = _device_id_from(handler_input)
     result = ma_control.get_current_track_time(player_id)
-    duration_ms, elapsed_ms, paused, last, upcoming = result if result else (None, None, False, False, None)
+    duration_ms, elapsed_ms, paused, last, upcoming, quality = (
+        result if result else (None, None, False, False, None, ""))
     position_ms = track_time.video_position_ms(arguments)
     previous_end = _track_changes.previous_end(session_id)
     if previous_end == 0:   # a new page
@@ -1205,7 +1206,8 @@ def _track_time_commands(handler_input, arguments, page_key, info):
     _images_on(page_key)["next"] = (upcoming or {}).get("image") or None
     return track_time.new_page_only_last(
         track_time.set_track_time_commands(offset, duration_ms, shown,
-                                           _track_changes.queue_end_ms(session_id), upcoming)
+                                           _track_changes.queue_end_ms(session_id), upcoming,
+                                           quality)
         + _favorite_commands(_favorites_of(player_id))
         + _mode_commands(_modes_of(player_id)))
 
@@ -1379,7 +1381,7 @@ def _modes_handoff_commands(device_id, page_key):
     commands = _mode_commands(_modes_of(player_id))
     result = ma_control.get_current_track_time(player_id)
     if result:
-        _, _, _, last, upcoming = result
+        _, _, _, last, upcoming, _ = result
         _track_changes.set_last(page_key, last)
         upcoming = _with_ma_hostname(upcoming)
         _images_on(page_key)["next"] = (upcoming or {}).get("image") or None

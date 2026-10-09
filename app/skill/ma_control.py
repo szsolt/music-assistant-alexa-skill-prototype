@@ -27,7 +27,7 @@ from music_assistant_client.exceptions import (
     ConnectionFailed,
     InvalidServerVersion,
 )
-from music_assistant_models.enums import PlaybackState
+from music_assistant_models.enums import ContentType, PlaybackState
 from music_assistant_models.errors import MusicAssistantError
 
 from env_secrets import get_env_secret
@@ -149,11 +149,39 @@ async def _get_track_time(server_url, token, player_id):
                     int(queue.corrected_elapsed_time * 1000),
                     queue.state == PlaybackState.PAUSED,
                     queue.next_item is None,
-                    _upcoming(client, queue.next_item))
+                    _upcoming(client, queue.next_item),
+                    quality(queue.current_item))
+
+
+# What the page calls a format, where MA's own name isn't the usual one.
+_FORMAT_NAMES = {"mpeg": "MP3", "mp4": "AAC", "mp4a": "AAC", "m4a": "AAC", "m4b": "AAC",
+                 "vorbis": "OGG", "wavpack": "WV"}
+
+
+def quality(item):
+    """The quality of a queue item's file, as the page shows it, or "" if unknown.
+
+    "FLAC 16/44.1" for lossless (bit depth / kHz), "MP3 192k" for lossy.
+    The file's, not what the Echo gets: MA streams it on as PCM.
+    """
+    media = getattr(item, "media_item", None)
+    formats = [m.audio_format for m in getattr(media, "provider_mappings", None) or ()
+               if m.available and m.audio_format]
+    details = getattr(item, "streamdetails", None)
+    fmt = formats[0] if formats else getattr(details, "audio_format", None)
+    if fmt is None:
+        return ""
+    kind = fmt.codec_type if fmt.codec_type != ContentType.UNKNOWN else fmt.content_type
+    if kind == ContentType.UNKNOWN:
+        return ""
+    name = _FORMAT_NAMES.get(kind.value, kind.value.upper())
+    if kind.is_lossless():
+        return f"{name} {fmt.bit_depth}/{fmt.sample_rate / 1000:g}"
+    return f"{name} {fmt.bit_rate}k" if fmt.bit_rate else name
 
 
 def _upcoming(client, item):
-    """What the page shows for the queue's next item: title, artist, album, image, length."""
+    """What the page shows for the queue's next item: title, artist, album, image, length, quality."""
     if item is None:
         return None
     media = item.media_item
@@ -172,16 +200,18 @@ def _upcoming(client, item):
             "secondary": artist,
             "album": album,
             "image": image,
-            "duration_ms": int(duration * 1000) if duration else 0}
+            "duration_ms": int(duration * 1000) if duration else 0,
+            "quality": quality(item)}
 
 
 def get_current_track_time(player_id):
-    """(duration_ms, elapsed_ms, paused, last, upcoming) of MA's current track on player_id, or None.
+    """(duration_ms, elapsed_ms, paused, last, upcoming, quality) of MA's current track on player_id, or None.
 
     duration_ms is None when MA doesn't know the length (e.g. radio); last
     is True when nothing follows it in the queue. upcoming: the next
-    track's title, secondary (artist), album, image and duration_ms (0 if
-    unknown), or None: the page switches to it at the track's end.
+    track's title, secondary (artist), album, image, duration_ms (0 if
+    unknown) and quality, or None: the page switches to it at the track's
+    end. quality: the current track's (see quality()).
     Called once per track change from the APL refresh, not per refresh.
     """
     server_url = get_env_secret("MA_API_URL")
