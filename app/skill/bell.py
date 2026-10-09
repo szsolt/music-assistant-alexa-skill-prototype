@@ -45,6 +45,13 @@ still show it playing:
   stream, and pauses MA if no page came. It also looks again when MA
   didn't answer, up to UNKNOWN_RETRIES times.
 Neither pauses MA if its player has other Echos: one of them may play it.
+
+MA can also end its stream early: it restarts it for a track at a higher
+sample rate. MA then waits for the player to report it has stopped, which
+the Echo never does. So MA stays on the track it streamed last, at the
+start, and the page plays on past that track's end into silence. Once the
+page is PAST_END_MS beyond it, the skill asks MA for the next track, as
+MA itself would. Once per track, and not if its player has other Echos.
 """
 
 import base64
@@ -77,6 +84,9 @@ _STARTED_WITHIN = 60   # log how long a stream took to play, if it went out this
 # A playing page's position moves with every bell. 20 s rides out a slow
 # start or a rebuffer, and still pauses MA before the user wonders why.
 STALL_SECONDS = 20
+# How far past the end of MA's track a page plays before the skill takes
+# MA's stream as ended. MA moves on within seconds when it hasn't.
+PAST_END_MS = 20_000
 # A page sends a bell every second, and a pull when a bell fails. 30 s of
 # neither means it closed, not that a few requests got lost.
 GONE_SECONDS = 30
@@ -121,6 +131,7 @@ class _Page:
         self.at = None           # its position in the last bell
         self.moved_at = now      # when it last moved, was paused or got a stream
         self.stall_logged = False   # a stall left alone (see _shares_player) was logged
+        self.ended_at = None     # the track end at which the skill last asked MA to move on
         # A page taken on after a restart: its first bell's press is old,
         # handled before the restart. Presses up to old_press aren't acted on over the LAN.
         self.taken_on = False
@@ -297,7 +308,7 @@ def _check(page_id, at, playing, now=None):
     state = _handlers["ma_state"](device_id, page_id)
     if not state or state[0] not in ("playing", "paused"):
         return
-    ma_state, elapsed_ms, offset_ms = state
+    ma_state, elapsed_ms, offset_ms, end_ms = state
     now = time.monotonic() if now is None else now
     fix = off = None
     with _lock:
@@ -305,7 +316,14 @@ def _check(page_id, at, playing, now=None):
             return   # something happened during the query
         stalled = (playing and ma_state == "playing"
                    and now - page.moved_at >= STALL_SECONDS)
-        if stalled:
+        # MA, still at the start of its track, isn't where the page is.
+        ended = (not stalled and playing and ma_state == "playing" and end_ms is not None
+                 and at - end_ms - (elapsed_ms or 0) >= PAST_END_MS and page.ended_at != end_ms)
+        if ended:
+            page.ended_at = end_ms
+            page.mismatches = 0
+            page.quiet_until = now + QUIET_SECONDS
+        elif stalled:
             page.mismatches = 0
             page.quiet_until = now + QUIET_SECONDS
             page.moved_at = now
@@ -324,6 +342,15 @@ def _check(page_id, at, playing, now=None):
             if abs(diff) > OFF_MS:
                 page.off_logged_at = now
                 off = diff
+    if ended:
+        if _shares_player(device_id):
+            logger.info("Page on %s plays %d ms past the end of MA's track; "
+                        "MA's player has other Echos: leaving MA", device_id[-8:], at - end_ms)
+        else:
+            logger.warning("Page on %s plays %d ms past the end of MA's track: "
+                           "MA's stream ended, asking MA for the next track", device_id[-8:], at - end_ms)
+            _handlers["next_ma"](device_id)
+        return
     if stalled:
         if not _shares_player(device_id):
             logger.warning("Page on %s stalled at %d ms while MA plays: pausing MA",

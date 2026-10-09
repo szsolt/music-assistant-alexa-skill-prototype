@@ -199,6 +199,17 @@ class TrackChangeTracker:
             if entry:
                 entry["last"] = last
 
+    def track_end_ms(self, session_id):
+        """Where the current track ends in this session's video (ms), or None.
+
+        None also on MA's last track: there the page ends the queue itself.
+        """
+        with self._lock:
+            entry = self._seen.get(session_id)
+            if not entry or entry["last"] or entry["offset"] is None or not entry["duration"]:
+                return None
+            return entry["offset"] + entry["duration"]
+
     def queue_end_ms(self, session_id):
         """Where MA's queue ends in this session's video (ms), or None if not on its last track."""
         with self._lock:

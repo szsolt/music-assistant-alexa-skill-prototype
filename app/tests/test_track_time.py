@@ -175,6 +175,17 @@ def test_queue_end_only_on_the_last_track():
     assert tracker.queue_end_ms("other") is None
 
 
+def test_track_end_except_on_the_last_track():
+    tracker = tt.TrackChangeTracker()
+    tracker.changed("s", ("u", "a", "x"))
+    assert tracker.track_end_ms("s") is None               # not placed yet
+    tracker.record("s", 100_000, 200_000)
+    assert tracker.track_end_ms("s") == 300_000
+    tracker.record("s", 100_000, 200_000, last=True)
+    assert tracker.track_end_ms("s") is None               # the page ends the queue itself
+    assert tracker.track_end_ms("other") is None
+
+
 def test_queue_end_unknown_duration():
     tracker = tt.TrackChangeTracker()
     tracker.changed("s", ("u", "radio", ""))

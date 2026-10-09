@@ -1419,16 +1419,17 @@ def _play_album_for(device_id):
 
 
 def _ma_state_of(device_id, page_id):
-    """(MA state, MA elapsed ms, the page's track offset ms) for the bell's check, or None."""
+    """(MA state, MA elapsed ms, the page's track offset and end ms) for the bell's check, or None."""
     player_id = device_mapping.get_player_for_device(device_id)
     state = ma_control.get_queue_state(player_id) if player_id else None
     if not state:
         return None
-    return state[0], state[1], _track_changes.offset(page_id)
+    return state[0], state[1], _track_changes.offset(page_id), _track_changes.track_end_ms(page_id)
 
 
 bell.set_handlers(press=_lan_press, ma_state=_ma_state_of,
                   pause_ma=lambda device_id: _sync_device_to_ma(device_id, "pause"),
+                  next_ma=lambda device_id: _next_or_previous_for(device_id, "next"),
                   peers=lambda device_id: device_mapping.get_devices_for_player(
                       device_mapping.get_player_for_device(device_id)))
 

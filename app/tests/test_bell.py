@@ -200,7 +200,7 @@ def _checked_page(ma_state):
 
 
 def test_page_playing_while_ma_paused_gets_paused():
-    page, calls = _checked_page(("paused", 1000, 0))
+    page, calls = _checked_page(("paused", 1000, 0, None))
     bell.rang(page, 1, "0", 5000, 1, now=1000)
     assert bell.rang(page, 1, "0", 5000, 1, now=1001)            # too soon for a second check
     bell.rang(page, 1, "0", 5000, 1, now=1000 + bell.CHECK_SECONDS)
@@ -210,7 +210,7 @@ def test_page_playing_while_ma_paused_gets_paused():
 
 
 def test_page_paused_while_ma_plays_pauses_ma():
-    page, calls = _checked_page(("playing", 1000, 0))
+    page, calls = _checked_page(("playing", 1000, 0, None))
     bell._pages[page].playing = False
     for n in range(bell.MISMATCH_CHECKS):
         bell.rang(page, 1, "0", 5000, 0, now=1000 + n * bell.CHECK_SECONDS)
@@ -219,18 +219,18 @@ def test_page_paused_while_ma_plays_pauses_ma():
 
 
 def test_no_check_while_quiet_or_ma_idle():
-    page, calls = _checked_page(("idle", 0, 0))
+    page, calls = _checked_page(("idle", 0, 0, None))
     for n in range(4):
         bell.rang(page, 1, "0", 5000, 1, now=1000 + n * bell.CHECK_SECONDS)
     assert bell.rang(page, 1) and calls == []
-    page, calls = _checked_page(("paused", 0, 0))
+    page, calls = _checked_page(("paused", 0, 0, None))
     bell.rang(page, 1, "1next0", 5000, 1, now=1000)               # a press: quiet for a while
     bell.rang(page, 1, "1next0", 5000, 1, now=1000 + bell.CHECK_SECONDS)
     assert bell.rang(page, 1)
 
 
 def test_position_far_off_ma_is_only_logged(caplog):
-    page, calls = _checked_page(("playing", 10_000, 2_000))
+    page, calls = _checked_page(("playing", 10_000, 2_000, None))
     caplog.set_level("INFO", logger="skill.bell")
     bell.rang(page, 1, "0", 17_000, 1, now=1000)                  # 15 s into the track vs 10 s
     assert any("5000 ms ahead of MA" in r.getMessage() for r in caplog.records)
@@ -267,14 +267,56 @@ def test_page_taken_on_after_restart_does_not_repeat_its_last_press():
 
 
 def test_no_position_log_early_in_a_track(caplog):
-    page, calls = _checked_page(("playing", 2_000, 0))           # MA is on the next track
+    page, calls = _checked_page(("playing", 2_000, 0, None))           # MA is on the next track
     caplog.set_level("INFO", logger="skill.bell")
     bell.rang(page, 1, "0", 200_000, 1, now=1000)                # the page has the old start
     assert not any("ahead of MA" in r.getMessage() for r in caplog.records)
 
 
+def _ended_page(ma_state):
+    page, calls = _checked_page(ma_state)
+    nexts = []
+    bell.set_handlers(next_ma=lambda device_id: nexts.append(device_id))
+    return page, calls, nexts
+
+
+def test_page_past_the_end_of_mas_track_asks_ma_for_the_next(caplog):
+    # MA ended its stream early: it shows its last track at the start, the page plays on.
+    page, calls, nexts = _ended_page(("playing", 0, 5_546_016, 5_661_016))
+    caplog.set_level("INFO", logger="skill.bell")
+    bell.rang(page, 1, "0", 5_661_016 + bell.PAST_END_MS - 1000, 1, now=1000)
+    assert nexts == []
+    bell.rang(page, 1, "0", 5_661_016 + bell.PAST_END_MS, 1, now=1000 + bell.CHECK_SECONDS)
+    assert nexts == ["d"] and calls == []
+    assert any("MA's stream ended" in r.getMessage() for r in caplog.records)
+    bell._pages[page].quiet_until = 0
+    bell.rang(page, 1, "0", 5_661_016 + 2 * bell.PAST_END_MS, 1, now=1000 + 4 * bell.CHECK_SECONDS)
+    assert nexts == ["d"]                                         # once per track
+
+
+def test_ma_on_the_next_track_is_not_asked_again():
+    # MA moved on, the page hasn't heard yet: MA's elapsed covers the gap.
+    page, calls, nexts = _ended_page(("playing", 25_000, 0, 200_000))
+    bell.rang(page, 1, "0", 226_000, 1, now=1000)
+    assert nexts == [] and calls == []
+
+
+def test_past_the_end_leaves_a_shared_player_alone():
+    page, calls, nexts = _ended_page(("playing", 0, 0, 200_000))
+    bell.set_handlers(peers=lambda device_id: ["d", "e"])
+    bell.rang(page, 1, "0", 200_000 + bell.PAST_END_MS, 1, now=1000)
+    assert nexts == [] and calls == []
+
+
+def test_paused_page_past_the_end_is_left_to_the_mismatch_check():
+    page, calls, nexts = _ended_page(("playing", 0, 0, 200_000))
+    bell._pages[page].playing = False
+    bell.rang(page, 1, "0", 200_000 + bell.PAST_END_MS, 0, now=1000)
+    assert nexts == []
+
+
 def test_stalled_page_pauses_ma(caplog):
-    page, calls = _checked_page(("playing", 30_000, 0))
+    page, calls = _checked_page(("playing", 30_000, 0, None))
     caplog.set_level("INFO", logger="skill.bell")
     for n in range(0, bell.STALL_SECONDS, bell.CHECK_SECONDS):
         bell.rang(page, 1, "0", 30_000, 1, now=1000 + n)          # the position stands still
@@ -285,11 +327,11 @@ def test_stalled_page_pauses_ma(caplog):
 
 
 def test_moving_or_paused_page_is_not_stalled():
-    page, calls = _checked_page(("playing", 30_000, 0))
+    page, calls = _checked_page(("playing", 30_000, 0, None))
     for n in range(0, 3 * bell.STALL_SECONDS, bell.CHECK_SECONDS):
         bell.rang(page, 1, "0", 30_000 + n * 1000, 1, now=1000 + n)
     assert calls == []
-    page, calls = _checked_page(("playing", 30_000, 0))
+    page, calls = _checked_page(("playing", 30_000, 0, None))
     bell._pages[page].playing = False
     for n in range(0, 3 * bell.STALL_SECONDS, bell.CHECK_SECONDS):
         bell.rang(page, 1, "0", 30_000, 0, now=1000 + n)          # paused: MA gets paused once
@@ -300,7 +342,7 @@ def test_moving_or_paused_page_is_not_stalled():
 
 
 def test_new_stream_restarts_the_stall_clock():
-    page, calls = _checked_page(("playing", 30_000, 0))
+    page, calls = _checked_page(("playing", 30_000, 0, None))
     bell.rang(page, 1, "0", 30_000, 1, now=1000)
     bell._pages[page].quiet_until = 0
     bell._add_pending(bell._pages[page], 2, 1000 + bell.STALL_SECONDS - 1, ("stream", "u"), [])
@@ -310,7 +352,7 @@ def test_new_stream_restarts_the_stall_clock():
 
 
 def test_page_that_stops_ringing_is_forgotten_and_pauses_ma(caplog):
-    page, calls = _checked_page(("playing", 30_000, 0))
+    page, calls = _checked_page(("playing", 30_000, 0, None))
     caplog.set_level("INFO", logger="skill.bell")
     bell.rang(page, 1, "0", 30_000, 1, now=1000)
     bell.sweep(now=1000 + bell.GONE_SECONDS - 1)
@@ -323,14 +365,14 @@ def test_page_that_stops_ringing_is_forgotten_and_pauses_ma(caplog):
 
 
 def test_gone_page_leaves_a_paused_ma_alone():
-    page, calls = _checked_page(("paused", 30_000, 0))
+    page, calls = _checked_page(("paused", 30_000, 0, None))
     bell.rang(page, 1, "0", 30_000, 0, now=1000)
     bell.sweep(now=1000 + bell.GONE_SECONDS)
     assert not bell.has_page("d") and calls == []
 
 
 def test_pulls_keep_a_page_without_lan_bells():
-    page, calls = _checked_page(("playing", 30_000, 0))
+    page, calls = _checked_page(("playing", 30_000, 0, None))
     bell.rang(page, 1, "0", 30_000, 1, now=1000)
     bell.pull(page, "d", 1, now=1000 + bell.GONE_SECONDS - 1)     # its bells fail, it pulls
     bell.sweep(now=1000 + bell.GONE_SECONDS)
@@ -339,7 +381,7 @@ def test_pulls_keep_a_page_without_lan_bells():
 
 def test_gone_page_leaves_ma_alone_after_a_new_stream():
     # "Alexa, stop", then "open music assistant": MA resumes before the new page comes.
-    page, calls = _checked_page(("playing", 30_000, 0))
+    page, calls = _checked_page(("playing", 30_000, 0, None))
     bell.rang(page, 1, "0", 30_000, 1, now=1000)
     bell.stream_sent(["d"], now=1010)
     bell.sweep(now=1000 + bell.GONE_SECONDS)
@@ -354,7 +396,7 @@ def test_gone_page_is_looked_at_again_when_mas_state_is_unknown():
     bell.rang(page, 1, "0", 30_000, 1, now=1000)
     bell.sweep(now=1000 + bell.GONE_SECONDS)
     assert calls == []
-    state[0] = ("playing", 30_000, 0)
+    state[0] = ("playing", 30_000, 0, None)
     bell.sweep(now=1000 + 2 * bell.GONE_SECONDS - 1)
     assert calls == []
     bell.sweep(now=1000 + 2 * bell.GONE_SECONDS)
@@ -377,7 +419,7 @@ def test_gone_page_leaves_ma_alone_when_a_new_page_came_during_the_query():
 
     def ma_state(device_id, page_id):
         bell.new_page("d")
-        return ("playing", 30_000, 0)
+        return ("playing", 30_000, 0, None)
     bell.set_handlers(ma_state=ma_state, pause_ma=lambda device_id: calls.append(device_id))
     page = bell.new_page("d")
     bell.rang(page, 1, "0", 30_000, 1, now=1000)
@@ -386,7 +428,7 @@ def test_gone_page_leaves_ma_alone_when_a_new_page_came_during_the_query():
 
 
 def test_ma_is_paused_if_no_page_comes_for_its_new_stream():
-    page, calls = _checked_page(("playing", 30_000, 0))
+    page, calls = _checked_page(("playing", 30_000, 0, None))
     bell.rang(page, 1, "0", 30_000, 1, now=1000)
     bell.stream_sent(["d"], now=1010)
     bell.sweep(now=1000 + bell.GONE_SECONDS)
@@ -396,7 +438,7 @@ def test_ma_is_paused_if_no_page_comes_for_its_new_stream():
 
 
 def test_ma_is_left_alone_once_the_new_page_comes():
-    page, calls = _checked_page(("playing", 30_000, 0))
+    page, calls = _checked_page(("playing", 30_000, 0, None))
     bell.rang(page, 1, "0", 30_000, 1, now=1000)
     bell.stream_sent(["d"], now=1010)
     bell.sweep(now=1000 + bell.GONE_SECONDS)
@@ -406,7 +448,7 @@ def test_ma_is_left_alone_once_the_new_page_comes():
 
 
 def test_gone_page_with_live_events_leaves_ma_alone():
-    page, calls = _checked_page(("playing", 30_000, 0))
+    page, calls = _checked_page(("playing", 30_000, 0, None))
     bell.rang(page, 1, "0", 30_000, 1, now=1000)
     lp.heard_from("d", now=1000 + bell.GONE_SECONDS - 1)          # its MetadataRefresh still comes
     bell.sweep(now=1000 + bell.GONE_SECONDS)
@@ -415,7 +457,7 @@ def test_gone_page_with_live_events_leaves_ma_alone():
 
 def test_a_player_with_other_echos_keeps_playing(caplog):
     # The other Echo may have no screen: nothing shows that it plays.
-    page, calls = _checked_page(("playing", 30_000, 0))
+    page, calls = _checked_page(("playing", 30_000, 0, None))
     caplog.set_level("INFO", logger="skill.bell")
     bell.set_handlers(peers=lambda device_id: ["d", "e"])
     for n in range(0, 3 * bell.STALL_SECONDS, bell.CHECK_SECONDS):
