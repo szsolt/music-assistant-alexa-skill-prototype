@@ -10,12 +10,14 @@ with its next track.
 import json
 import logging
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
 _store = None
 _version = 0
 _streams = {}   # player_id -> the latest stream MA pushed for it
+_sent_at = {}   # player_id -> time.monotonic() MA last sent it a stream to play
 
 
 def _path():
@@ -43,6 +45,8 @@ def save(store):
     Returns the stream's player id, or None if unknown.
     """
     global _store, _version
+    if store.get("playerId"):
+        _sent_at[store["playerId"]] = time.monotonic()
     player_id = _player_of(store)
     store = dict(store, playerId=player_id)
     _store, _version = store, store.get("version", _version)
@@ -95,3 +99,13 @@ def _load():
 
 
 _load()
+
+
+def sent_since(player_id, seconds, now=None):
+    """True if MA sent player_id a stream to play in the last seconds.
+
+    Not its pushes for the next track in its flow: those only bring metadata.
+    """
+    now = time.monotonic() if now is None else now
+    sent = _sent_at.get(player_id)
+    return sent is not None and now - sent <= seconds

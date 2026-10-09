@@ -201,8 +201,10 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
         # position, paused or playing. Replaying the stored URL makes MA
         # restart that flow where it first started it, while MA's clock (and
         # with it track time and the next title) runs on from the old start.
-        # PlayAudio is MA itself sending a new stream: play that.
-        if (is_request_type("LaunchRequest")(handler_input)
+        # PlayAudio is MA itself sending a new stream: play that. Unless MA
+        # sent none just now and is paused: then someone said "play", and
+        # the page alone would play while MA stays paused.
+        if ((is_request_type("LaunchRequest")(handler_input) or _said_play(device_id))
                 and _resume_through_ma(handler_input) == "ok"):
             return handler_input.response_builder.set_should_end_session(True).response
         request = handler_input.request_envelope.request
@@ -244,6 +246,18 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
             live_page.closed(_device_id_from(handler_input))
             _watch_page(_device_id_from(handler_input))
         return response
+
+
+# MA speaks "play audio" to the Echo within a few seconds of sending its stream.
+_MA_PLAY_SECONDS = 15
+
+
+def _said_play(device_id):
+    """A PlayAudio that isn't MA's: MA is paused and sent no stream just now."""
+    import shared_store
+    player_id = device_mapping.get_player_for_device(device_id)
+    return bool(player_id) and not shared_store.sent_since(player_id, _MA_PLAY_SECONDS) \
+        and ma_control.is_paused(player_id)
 
 
 # A working player page sends its first refresh 2-4 s after it opens. After

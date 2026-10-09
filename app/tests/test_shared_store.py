@@ -62,3 +62,13 @@ def test_old_single_stream_file_still_loads(tmp_path, monkeypatch):
         {"streamUrl": "https://s/flow/a", "title": "Old", "playerId": None, "version": 9}))
     shared_store._load()
     assert shared_store._store["title"] == "Old" and shared_store._version == 9
+
+
+def test_sent_since_counts_streams_to_play_not_flow_metadata(tmp_path, monkeypatch):
+    _fresh(tmp_path, monkeypatch)
+    monkeypatch.setattr(shared_store, "_sent_at", {})
+    shared_store.save({"streamUrl": "https://s/flow/a", "title": "A1"})     # next track in the flow
+    assert not shared_store.sent_since("pa", 15)
+    shared_store.save({"streamUrl": "https://s/flow/a", "title": "A1", "playerId": "pa"})
+    assert shared_store.sent_since("pa", 15)
+    assert not shared_store.sent_since("pa", 15, now=shared_store._sent_at["pa"] + 16)

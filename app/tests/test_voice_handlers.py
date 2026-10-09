@@ -200,3 +200,12 @@ def test_cancel_sleep_timer_says_if_there_was_none(monkeypatch):
     monkeypatch.setattr(lf.sleep_timer, "cancel", lambda device_id: False)
     response = lf.CancelSleepTimerHandler().handle(_input("CancelSleepTimer"))
     assert "no sleep timer" in response.output_speech.ssml
+
+
+@pytest.mark.parametrize("sent, paused, said", [(False, True, True), (True, True, False), (False, False, False)])
+def test_play_is_someones_only_when_ma_is_paused_and_sent_nothing(monkeypatch, sent, paused, said):
+    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "p")
+    monkeypatch.setattr(lf.ma_control, "is_paused", lambda player_id: paused)
+    import shared_store
+    monkeypatch.setattr(shared_store, "sent_since", lambda player_id, seconds: sent)
+    assert lf._said_play("d") is said
