@@ -108,6 +108,8 @@ Each phrase says what kind of thing to play: "play artist X", "shuffle album X",
 
 "Move the music to the kitchen" moves the queue to another MA player. The music goes on there from the same spot. The skill learns the player names with the library names.
 
+"Alexa, ask music assistant to stop in 30 minutes" pauses MA when the time is up. "Cancel the sleep timer" turns it off. Alexa keeps "Alexa, stop music in 30 minutes" for its own timer, which doesn't stop the player screen. A restart of the skill drops the timer.
+
 To upload them automatically:
 
 1. In the [Amazon developer console](https://developer.amazon.com/loginwithamazon/console/site/lwa/overview.html), create a Login with Amazon security profile. Note its client id and secret.
