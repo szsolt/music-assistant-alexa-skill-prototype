@@ -178,6 +178,10 @@ class SkillEventHandler(AbstractRequestHandler):
         return handler_input.response_builder.response
 
 
+_NOTHING_TO_PLAY_MSG = ("Music Assistant has nothing to play on this device yet. "
+                        "Start a song for it in Music Assistant.")
+
+
 class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
     """Launch radio for skill launch or PlayAudio intent."""
     def can_handle(self, handler_input):
@@ -205,6 +209,14 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
         if (is_request_type("LaunchRequest")(handler_input)
                 and _resume_through_ma(handler_input) == "ok"):
             return handler_input.response_builder.set_should_end_session(True).response
+        # MA had nothing to resume for this Echo's player. The stored stream
+        # is then the latest of any player: another player's old stream
+        # shows its album and plays nothing.
+        if (is_request_type("LaunchRequest")(handler_input)
+                and device_mapping.is_other_players_stream(
+                    device_id, (shared_store._store or {}).get('playerId'))):
+            handler_input.response_builder.speak(_NOTHING_TO_PLAY_MSG).set_should_end_session(True)
+            return handler_input.response_builder.response
         # Unless MA sent none just now and is paused: then someone said
         # "play", and the page alone would play while MA stays paused. Resume
         # MA as for "resume", on the open page.
@@ -228,8 +240,7 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
 
         if not url:
             logger.warning("No streamUrl available for Launch/Play request")
-            handler_input.response_builder.speak(
-                "Music Assistant has nothing to play on this device yet. Start a song for it in Music Assistant.").set_should_end_session(True)
+            handler_input.response_builder.speak(_NOTHING_TO_PLAY_MSG).set_should_end_session(True)
             return handler_input.response_builder.response
 
         logger.info("Playing URL: %s", url)

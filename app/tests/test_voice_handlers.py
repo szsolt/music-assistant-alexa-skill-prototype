@@ -217,3 +217,17 @@ def test_said_play_resumes_ma_on_the_open_page(monkeypatch):
     resumed = object()
     monkeypatch.setattr(lf, "_stream_reply", lambda handler_input, send: resumed)
     assert lf.LaunchRequestOrPlayAudioHandler().handle(_input("PlayAudio")) is resumed
+
+
+def test_open_does_not_play_another_players_stream(monkeypatch):
+    monkeypatch.setattr(lf.device_mapping, "is_another_echos_stream", lambda *a: False)
+    monkeypatch.setattr(lf, "_resume_through_ma", lambda handler_input: "failed")
+    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "office")
+    import shared_store
+    monkeypatch.setattr(shared_store, "_store", {"playerId": "kitchen", "streamUrl": "https://x/kitchen.mp3"})
+    played = []
+    monkeypatch.setattr(lf.util, "play", lambda **kwargs: played.append(kwargs))
+    launch = _input(None)
+    launch.request_envelope.request.object_type = "LaunchRequest"
+    response = lf.LaunchRequestOrPlayAudioHandler().handle(launch)
+    assert played == [] and "nothing to play" in response.output_speech.ssml

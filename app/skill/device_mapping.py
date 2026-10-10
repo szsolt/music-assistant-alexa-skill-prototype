@@ -89,6 +89,12 @@ def is_another_echos_stream(device_id, player_id):
     return not get_player_for_device(device_id) and bool(get_devices_for_player(player_id))
 
 
+
+def is_other_players_stream(device_id, player_id):
+    """True if device_id is paired with a player other than player_id, the latest stream's."""
+    own = get_player_for_device(device_id)
+    return bool(own and player_id and own != player_id)
+
 PAIR_WINDOW_S = 10
 _waiting = {}   # player_id -> time.monotonic() of its stream, for players with no Echo
 _waiting_lock = threading.Lock()

@@ -53,3 +53,11 @@ def test_an_unpaired_echo_does_not_play_another_echos_stream(tmp_path, monkeypat
     assert not dm.is_another_echos_stream("echo-1", "office")
     assert not dm.is_another_echos_stream("echo-2", "kitchen")   # no Echo yet: plays, as before
     assert not dm.is_another_echos_stream("echo-2", None)        # an MA that sends no playerId
+
+
+def test_a_paired_echo_does_not_play_another_players_stream(tmp_path, monkeypatch):
+    _use_tmp_mapping(tmp_path, monkeypatch, {"echo-1": "office"})
+    assert dm.is_other_players_stream("echo-1", "kitchen")
+    assert not dm.is_other_players_stream("echo-1", "office")
+    assert not dm.is_other_players_stream("echo-2", "kitchen")   # unpaired: is_another_echos_stream's case
+    assert not dm.is_other_players_stream("echo-1", None)        # an MA that sends no playerId
