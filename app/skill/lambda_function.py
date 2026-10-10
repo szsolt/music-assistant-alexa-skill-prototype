@@ -1148,8 +1148,6 @@ _SKILL_NAME = "Music Assistant"
 # and where MA paused (its elapsed time on the paused page). Where the
 # stream of our last resume starts: (ms into the track, valid until).
 _STREAM_START_TTL_SECONDS = 60
-# page key -> the images on the page (util.update_apl_metadata)
-_page_images = {}
 _paused_at = {}
 _ma_paused_at = {}
 _stream_start = {}
@@ -1278,9 +1276,7 @@ def _track_time_commands(handler_input, arguments, page_key, info):
 
 def _images_on(page_key):
     """The images on that page, as util.update_apl_metadata keeps them."""
-    if page_key not in _page_images and len(_page_images) > 100:
-        _page_images.clear()
-    return _page_images.setdefault(page_key, {})
+    return apl.images_on(page_key)
 
 
 def _with_ma_hostname(upcoming):

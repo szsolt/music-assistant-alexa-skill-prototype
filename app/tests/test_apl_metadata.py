@@ -118,3 +118,12 @@ def test_quality_sits_left_of_the_time_and_follows_track_changes():
     assert {"name": "quality", "type": "string", "value": ""} in binds
     assert {"name": "nextQuality", "type": "string", "value": ""} in binds
     assert '"property": "quality", "value": "${nextQuality}"' in json.dumps(layout)
+
+
+def test_a_new_pages_first_update_does_not_set_its_images_again(monkeypatch):
+    monkeypatch.setattr(apl, "_get_metadata", lambda device_id=None: _info("a.jpg"))
+    monkeypatch.setattr(util, "get_ma_hostname", lambda **kw: "")
+    builder = _Builder()
+    apl.add_apl(builder)
+    page_id = builder.directives[0].document["mainTemplate"]["items"][0]["bellPage"]
+    assert ("AlexaBackground", "backgroundImageSource") not in _set(_info("a.jpg"), apl.images_on(page_id), monkeypatch)

@@ -15,6 +15,17 @@ if _app_src not in sys.path:
     sys.path.insert(0, _app_src)
 
 
+# page id -> the images on the page, as util.update_apl_metadata keeps them
+_page_images = {}
+
+
+def images_on(page_id):
+    """The images on that page: {"cover", "background", "next"}."""
+    if page_id not in _page_images and len(_page_images) > 100:
+        _page_images.clear()
+    return _page_images.setdefault(page_id, {})
+
+
 def _load_apl_template():
     # type: () -> dict
     """Load the APL document template from JSON file."""
@@ -141,6 +152,8 @@ def add_apl(response_builder, start_paused=False, device_id=None):
         bell_page = bell.new_page(device_id)
         page_id = bell_page or secrets.token_hex(8)
         track_time.pages.started(page_id)   # its stream starts with the current track
+        # its first update must not set these again: a new background flashes
+        images_on(page_id).update(cover=cover_image, background=background_image)
         main_template_item.update({
             "bellUrl": bell.base_url() if bell_page else "",
             "bellPage": page_id,
