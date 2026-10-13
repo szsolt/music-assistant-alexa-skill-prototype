@@ -96,6 +96,6 @@ An Echo without a screen plays through Alexa's AudioPlayer. Amazon checks that s
 ## Requirements for the LAN-only setup
 
 - An Echo with a screen, and `ENABLE_APL=true`.
-- Each MA player's output codec set to MP3. The Echo drops FLAC without a sound.
+- Each MA player's output codec set to MP3 or WAV. The Echo drops FLAC without a sound.
 - A reverse proxy for the stream host. It sends `/bell/` to the skill and everything else to MA's stream port (8097).
 - The Echo paired with its MA player. A new Echo pairs itself the first time MA plays on it. The `/devices` page pairs one by hand.
