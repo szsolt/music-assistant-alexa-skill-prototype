@@ -132,7 +132,7 @@ The Echo and MA can disagree: a page closes, a stream stalls, Alexa breaks off. 
 | The page closed | No bell and no pull for 30 s | Pauses MA, without speech |
 | MA ended its stream early (it does at a sample-rate change) | The page plays 20 s past the track's end | Asks MA for the next track |
 
-For a player with more than one Echo, the skill doesn't pause, skip or reopen anything for MA: another Echo may still play it.
+For a player with more than one Echo, a stalled or closed page doesn't pause MA, and the skill doesn't skip or reopen: another Echo may still play it.
 
 ## Voice commands
 
