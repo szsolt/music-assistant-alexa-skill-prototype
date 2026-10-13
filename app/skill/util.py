@@ -18,7 +18,7 @@ from ask_sdk_model.interfaces import display
 from ask_sdk_core.response_helper import ResponseFactory
 from ask_sdk_core.handler_input import HandlerInput
 from ask_sdk_model.interfaces.alexa.presentation.apl import ExecuteCommandsDirective, ControlMediaCommand, MediaCommandType
-from . import data
+from . import data, track_time
 from .apl import add_apl
 
 
@@ -116,9 +116,9 @@ def push_alexa_metadata(url):
             logging.exception('Unexpected error while pushing Alexa metadata')
 
 
-def play(url, offset, text, response_builder, supports_apl=False):
+def play(url, offset, text, response_builder, supports_apl=False, device_id=None):
     if supports_apl and apl_enabled():
-        add_apl(response_builder)
+        add_apl(response_builder, device_id=device_id)
     else:
         try:
             hostname = get_ma_hostname(raise_on_http_scheme=True)
@@ -264,15 +264,16 @@ def stop(text, response_builder, supports_apl=False):
     return response_builder.response
 
 
-def pause(text, response_builder, supports_apl=False, session_new=False):
+def pause(text, response_builder, supports_apl=False, session_new=False, device_id=None):
     if supports_apl and apl_enabled():
         try:
             if session_new:
                 try:
-                    add_apl(response_builder, start_paused=True)
+                    add_apl(response_builder, start_paused=True, device_id=device_id)
                 except Exception:
                     logging.exception('Failed to re-render APL on session new')
-                response_builder.set_should_end_session(False)
+                # Unset, not False: False opens the mic (as for the refresh).
+                response_builder.set_should_end_session(None)
             else:
                 cmd = ControlMediaCommand(command=MediaCommandType.pause, component_id="videoPlayer")
                 response_builder.add_directive(
@@ -280,7 +281,7 @@ def pause(text, response_builder, supports_apl=False, session_new=False):
                         commands=[cmd],
                         token="playbackToken"
                     )
-                ).set_should_end_session(False)
+                ).set_should_end_session(None)
         except Exception:
             logging.exception('Failed to add APL pause command; falling back to Stop')
             response_builder.add_directive(StopDirective())
@@ -300,15 +301,21 @@ def clear(response_builder):
     return response_builder.response
 
 
-def update_apl_metadata(response_builder):
+def update_apl_metadata(response_builder, info=None, shown=None):
     """Update the APL document with the latest metadata without interrupting playback.
 
     This function sends ExecuteCommands directives to update only the text and image
     components, avoiding a full document re-render that would restart audio playback.
     This is called in response to UserEvent requests from the APL document.
+    
+    shown: the page's images ({"cover", "background", "next"}), kept by the
+    caller. Images the page already shows aren't set again: setting the
+    background rebuilds it, and the screen flashes. "next" is the image the
+    page switches to by itself when the track ends.
     """
     if not apl_enabled():
         return
+    info = data.info if info is None else info
     try:
         # Replace MA-hosted image sources if MA_HOSTNAME is set
         try:
@@ -316,32 +323,43 @@ def update_apl_metadata(response_builder):
         except ValueError:
             hostname = ''
 
-        cover_image = data.info.get("coverImageSource", "")
-        background_image = data.info.get("backgroundImageSource", "")
+        cover_image = info.get("coverImageSource", "")
+        background_image = info.get("backgroundImageSource", "")
 
         if hostname:
             cover_image = replace_ip_in_url(cover_image, hostname)
             background_image = replace_ip_in_url(background_image, hostname)
+        if shown is not None:
+            on_page = {shown.get("cover"), shown.get("next")}
+            new_cover, new_background = cover_image, background_image
+            if cover_image in on_page:
+                cover_image = ""
+            if background_image in on_page | {shown.get("background")}:
+                background_image = ""
+            shown.update(cover=new_cover or shown.get("cover"),
+                         background=new_background or shown.get("background"), next=None)
 
         # Build SetValue commands to update individual components
         commands = []
 
         # Update primary text (song title)
-        if data.info.get("primaryText"):
-            commands.append({
-                "type": "SetValue",
-                "componentId": "Audio_PrimaryText",
-                "property": "text",
-                "value": data.info["primaryText"]
-            })
+        if info.get("primaryText"):
+            for component in ("Audio_PrimaryText", "Audio_PrimaryTextLong"):
+                commands.append({
+                    "type": "SetValue",
+                    "componentId": component,
+                    "property": "text",
+                    "value": info["primaryText"]
+                })
 
-        # Update secondary text (artist/album)
-        if data.info.get("secondaryText"):
+        # Update secondary text (artist); with a new title even when empty,
+        # so a track with no artist doesn't keep the last one's.
+        if info.get("primaryText") or info.get("secondaryText"):
             commands.append({
                 "type": "SetValue",
                 "componentId": "Audio_SecondaryText",
                 "property": "text",
-                "value": data.info["secondaryText"]
+                "value": info.get("secondaryText") or ""
             })
 
         # Update cover image and bound data so conditional rendering refreshes.
@@ -374,6 +392,29 @@ def update_apl_metadata(response_builder):
                 "value": background_image
             })
 
+        # Last: pages opened before the third title size or the album line
+        # lack these, and should still take the updates above.
+        if info.get("primaryText"):
+            commands.append({
+                "type": "SetValue",
+                "componentId": "Audio_PrimaryTextLonger",
+                "property": "text",
+                "value": info["primaryText"]
+            })
+            commands.append({
+                "type": "SetValue",
+                "componentId": "AudioPlayerRoot",
+                "property": "titleSize",
+                "value": track_time.title_size(info["primaryText"])
+            })
+            # Even when empty: a track with no album hides the last one's.
+            commands.append({
+                "type": "SetValue",
+                "componentId": "AudioPlayerRoot",
+                "property": "album",
+                "value": info.get("albumText") or ""
+            })
+
         # Send ExecuteCommands directive if we have any commands
         if commands:
             response_builder.add_directive(
@@ -389,6 +430,37 @@ def update_apl_metadata(response_builder):
         logging.exception('Error while updating APL metadata')
 
 
+def execute_apl_commands(response_builder, commands):
+    """Send APL commands to the player page, if there are any."""
+    if not commands or not apl_enabled():
+        return
+    response_builder.add_directive(
+        ExecuteCommandsDirective(
+            commands=commands,
+            token="playbackToken"
+        )
+    )
+
+
+def apl_refresh_commands(delay_ms=1000):
+    """APL commands that ask for the next metadata refresh after delay_ms."""
+    return [
+        {
+            "type": "Idle",
+            "delay": int(delay_ms)
+        },
+        {
+            "type": "SendEvent",
+            "arguments": [
+                "MetadataRefresh",
+                "${refreshTick}",
+                "${videoProgressValue}",
+                "${bellPage}"
+            ]
+        }
+    ]
+
+
 def schedule_apl_refresh(response_builder, delay_ms=1000):
     """Schedule the next APL metadata refresh via a UserEvent.
 
@@ -397,23 +469,9 @@ def schedule_apl_refresh(response_builder, delay_ms=1000):
     if not apl_enabled():
         return
     try:
-        commands = [
-            {
-                "type": "Idle",
-                "delay": int(delay_ms)
-            },
-            {
-                "type": "SendEvent",
-                "arguments": [
-                    "MetadataRefresh",
-                    "${refreshTick}"
-                ]
-            }
-        ]
-
         response_builder.add_directive(
             ExecuteCommandsDirective(
-                commands=commands,
+                commands=apl_refresh_commands(delay_ms),
                 token="playbackToken"
             )
         )

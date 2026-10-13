@@ -27,11 +27,15 @@ from music_assistant_client.exceptions import (
     ConnectionFailed,
     InvalidServerVersion,
 )
+from music_assistant_models.enums import ContentType, PlaybackState
 from music_assistant_models.errors import MusicAssistantError
 
 from env_secrets import get_env_secret
+from . import track_time
 
 logger = logging.getLogger(__name__)
+# The client logs every connect; the player page's check connects every few seconds.
+logging.getLogger("music_assistant_client").setLevel(logging.WARNING)
 
 SUPPORTED_COMMANDS = ("next", "previous", "start_over", "pause", "stop", "resume")
 
@@ -132,3 +136,166 @@ def send_player_command(player_id, command):
     except Exception:
         logger.exception("Unexpected error sending %s command to MA player %s", command, player_id)
         return False
+
+
+async def _get_track_time(server_url, token, player_id):
+    async with aiohttp.ClientSession() as session:
+        async with MusicAssistantClient(server_url, session, token=token) as client:
+            queue = await client.player_queues.get_active_queue(player_id)
+            if queue is None or queue.current_item is None:
+                return None
+            duration = queue.current_item.duration
+            return (int(duration * 1000) if duration else None,
+                    int(queue.corrected_elapsed_time * 1000),
+                    queue.state == PlaybackState.PAUSED,
+                    queue.next_item is None,
+                    _upcoming(client, queue.next_item),
+                    quality(queue.current_item))
+
+
+# What the page calls a format, where MA's own name isn't the usual one.
+_FORMAT_NAMES = {"mpeg": "MP3", "mp4": "AAC", "mp4a": "AAC", "m4a": "AAC", "m4b": "AAC",
+                 "vorbis": "OGG", "wavpack": "WV"}
+
+
+def quality(item):
+    """The quality of a queue item's file, as the page shows it, or "" if unknown.
+
+    "FLAC 16/44.1" for lossless (bit depth / kHz), "MP3 192k" for lossy.
+    The file's, not what the Echo gets: MA streams it on as PCM.
+    """
+    media = getattr(item, "media_item", None)
+    formats = [m.audio_format for m in getattr(media, "provider_mappings", None) or ()
+               if m.available and m.audio_format]
+    details = getattr(item, "streamdetails", None)
+    fmt = formats[0] if formats else getattr(details, "audio_format", None)
+    if fmt is None:
+        return ""
+    kind = fmt.codec_type if fmt.codec_type != ContentType.UNKNOWN else fmt.content_type
+    if kind == ContentType.UNKNOWN:
+        return ""
+    name = _FORMAT_NAMES.get(kind.value, kind.value.upper())
+    if kind.is_lossless():
+        return f"{name} {fmt.bit_depth}/{fmt.sample_rate / 1000:g}"
+    return f"{name} {fmt.bit_rate}k" if fmt.bit_rate else name
+
+
+def _upcoming(client, item):
+    """What the page shows for the queue's next item: title, artist, album, image, length, quality."""
+    if item is None:
+        return None
+    media = item.media_item
+    title = (media.name if media else None) or item.name or ""
+    version = getattr(media, "version", None)
+    if version:
+        title = f"{title} ({version})"
+    artist = getattr(media, "artist_str", "") or ""
+    album = getattr(getattr(media, "album", None), "name", "") or ""
+    try:
+        image = client.get_media_item_image_url(item, size=512) or ""
+    except Exception:
+        image = ""
+    duration = getattr(media, "duration", None) or item.duration
+    return {"title": title,
+            "secondary": artist,
+            "album": album,
+            "image": image,
+            "duration_ms": int(duration * 1000) if duration else 0,
+            "quality": quality(item)}
+
+
+def get_current_track_time(player_id):
+    """(duration_ms, elapsed_ms, paused, last, upcoming, quality) of MA's current track on player_id, or None.
+
+    duration_ms is None when MA doesn't know the length (e.g. radio); last
+    is True when nothing follows it in the queue. upcoming: the next
+    track's title, secondary (artist), album, image, duration_ms (0 if
+    unknown) and quality, or None: the page switches to it at the track's
+    end. quality: the current track's (see quality()).
+    Called once per track change from the APL refresh, not per refresh.
+    """
+    server_url = get_env_secret("MA_API_URL")
+    token = get_env_secret("MA_API_TOKEN")
+    if not server_url:
+        logger.error("MA_API_URL is not set; cannot read track time from MA")
+        return None
+    try:
+        return asyncio.run(_get_track_time(server_url, token, player_id))
+    except (CannotConnect, ConnectionFailed, InvalidServerVersion) as e:
+        logger.warning("Could not connect to Music Assistant at %s: %s", server_url, e)
+    except MusicAssistantError as e:
+        logger.warning("Music Assistant could not return the queue of player %s: %s", player_id, e)
+    except Exception:
+        logger.exception("Unexpected error reading track time of MA player %s", player_id)
+    return None
+
+
+async def _get_queue_state(server_url, token, player_id):
+    async with aiohttp.ClientSession() as session:
+        async with MusicAssistantClient(server_url, session, token=token) as client:
+            queue = await client.player_queues.get_active_queue(player_id)
+            if queue is None or queue.current_item is None:
+                return None
+            return queue.state.value, int(queue.corrected_elapsed_time * 1000)
+
+
+def get_queue_state(player_id):
+    """(state, elapsed_ms) of MA's queue on player_id, or None.
+
+    state is MA's playback state: "playing", "paused" or "idle". For the
+    player page's check every few seconds (bell.py).
+    """
+    server_url = get_env_secret("MA_API_URL")
+    token = get_env_secret("MA_API_TOKEN")
+    if not server_url:
+        return None
+    try:
+        return asyncio.run(_get_queue_state(server_url, token, player_id))
+    except Exception as e:
+        logger.debug("Could not read the queue state of MA player %s: %s", player_id, e)
+    return None
+
+
+def is_paused(player_id):
+    """True if MA's queue on player_id is paused (False if unknown)."""
+    result = get_current_track_time(player_id)
+    return bool(result and result[2])
+
+
+async def _resume_at(server_url, token, player_id, position_ms):
+    async with aiohttp.ClientSession() as session:
+        async with MusicAssistantClient(server_url, session, token=token) as client:
+            queue = await client.player_queues.get_active_queue(player_id)
+            if queue is None or queue.current_item is None:
+                raise ValueError(f"No active queue/current track for player {player_id}")
+            # corrected: where a playing queue is now, not at its last update
+            position = track_time.resume_position_s(position_ms, queue.corrected_elapsed_time,
+                                                    queue.current_item.duration)
+            await client.player_queues.seek(queue.queue_id, position)
+            return position * 1000
+
+
+def resume_at(player_id, position_ms=None):
+    """Resume MA's current track at position_ms (default: where MA is).
+
+    Returns the position used, in ms, or None on failure.
+
+    Not players.play(): for this provider that speaks AMAZON.ResumeIntent
+    back into the Echo, which reopens the old flow URL at the start of the
+    track. A queue seek makes MA build a new stream from the position and
+    push it like any track change, with no echoed intent.
+    """
+    server_url = get_env_secret("MA_API_URL")
+    token = get_env_secret("MA_API_TOKEN")
+    if not server_url:
+        logger.error("MA_API_URL is not set; cannot resume MA player %s", player_id)
+        return None
+    try:
+        return asyncio.run(_resume_at(server_url, token, player_id, position_ms))
+    except (CannotConnect, ConnectionFailed, InvalidServerVersion) as e:
+        logger.error("Could not connect to Music Assistant at %s: %s", server_url, e)
+    except MusicAssistantError as e:
+        logger.error("Music Assistant rejected resume for player %s: %s", player_id, e)
+    except Exception:
+        logger.exception("Unexpected error resuming MA player %s", player_id)
+    return None

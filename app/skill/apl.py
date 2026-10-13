@@ -3,15 +3,27 @@
 import json
 import logging
 import os
+import secrets
 import sys
 from ask_sdk_model.interfaces.alexa.presentation.apl import RenderDocumentDirective
 from ask_sdk_core.response_helper import ResponseFactory
-from . import data
+from . import bell, data, track_time
 
 # Ensure /app/src is on the Python path so shared_store can be imported
 _app_src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _app_src not in sys.path:
     sys.path.insert(0, _app_src)
+
+
+# page id -> the images on the page, as util.update_apl_metadata keeps them
+_page_images = {}
+
+
+def images_on(page_id):
+    """The images on that page: {"cover", "background", "next"}."""
+    if page_id not in _page_images and len(_page_images) > 100:
+        _page_images.clear()
+    return _page_images.setdefault(page_id, {})
 
 
 def _load_apl_template():
@@ -22,14 +34,75 @@ def _load_apl_template():
         return json.load(f)
 
 
-def add_apl(response_builder, start_paused=False):
-    # type: (ResponseFactory, bool) -> None
-    """Add the RenderDocumentDirective to the response with APL document."""
+def _components(node):
+    """Every component dict in an APL layout tree, depth first."""
+    if isinstance(node, dict):
+        if "type" in node:
+            yield node
+        for key in ("item", "items"):
+            yield from _components(node.get(key))
+    elif isinstance(node, list):
+        for child in node:
+            yield from _components(child)
+
+
+# Set by the skill (set_start_track_time): start_track_time(device_id) is
+# (track offset ms, track duration ms) for a new page, or None.
+_start_track_time = None
+
+
+def set_start_track_time(fn):
+    global _start_track_time
+    _start_track_time = fn
+
+
+# Set by the skill (set_start_buttons): start_buttons(device_id) is the
+# states of the page's shuffle, repeat and heart buttons, as the page's
+# bind names ({"shuffleOn": 1, ...}); the ones it couldn't get are missing.
+_start_buttons = None
+
+
+def set_start_buttons(fn):
+    global _start_buttons
+    _start_buttons = fn
+
+
+def _start_values(device_id):
+    """The page's first track time and button states: right from the start, not after its first refresh."""
+    if not device_id:
+        return {}
+    values = {}
+    if _start_buttons:
+        try:
+            buttons = _start_buttons(device_id) or {}
+        except Exception:
+            logging.exception("Could not get the button states for a new page")
+            buttons = {}
+        values.update({"start" + name[0].upper() + name[1:]: int(value) for name, value in buttons.items()})
+    if not _start_track_time:
+        return values
+    try:
+        start = _start_track_time(device_id)
+    except Exception:
+        logging.exception("Could not get the track time for a new page")
+        return values
+    if not start or start[0] is None:
+        return values
+    return dict(values, startOffset=int(start[0]), startDuration=int(start[1] or 0))
+
+
+def add_apl(response_builder, start_paused=False, device_id=None):
+    # type: (ResponseFactory, bool, str) -> None
+    """Add the RenderDocumentDirective to the response with APL document.
+
+    Every page gets a random id, which its events carry back. With device_id
+    (and APL_BELL_URL) the page also gets a doorbell (see bell.py).
+    """
     # Import here to avoid circular imports
     from .util import get_ma_hostname, replace_ip_in_url
 
     # Get metadata from shared_store (most reliable) or data.info as fallback
-    metadata = _get_metadata()
+    metadata = _get_metadata(device_id)
     if not metadata:
         logging.warning("No metadata available for APL rendering")
         return
@@ -53,18 +126,12 @@ def add_apl(response_builder, start_paused=False):
     # Set the dynamic autoplay value based on start_paused
     autoplay = not start_paused
 
-    # Update autoplay in Video component and AlexaTransportControls
-    try:
-        video_component = apl_document["layouts"]["AudioPlayer"]["item"][0]["items"][2]["items"][1]["items"][0]
-        video_component["autoplay"] = autoplay
-    except (KeyError, IndexError):
-        logging.debug("Could not set video autoplay in APL template")
-
-    try:
-        transport_controls = apl_document["layouts"]["AudioPlayer"]["item"][0]["items"][2]["items"][1]["items"][1]["items"][0]["item"][1]
-        transport_controls["autoplay"] = autoplay
-    except (KeyError, IndexError):
-        logging.debug("Could not set transport autoplay in APL template")
+    # Update autoplay in the Video component, found by type: its place in
+    # the layout changes with the page design. The play/pause button
+    # follows the video's own play and pause events.
+    for component in _components(apl_document["layouts"]["AudioPlayer"]):
+        if component.get("type") == "Video":
+            component["autoplay"] = autoplay
 
     # Update mainTemplate with metadata values
     try:
@@ -73,12 +140,29 @@ def add_apl(response_builder, start_paused=False):
             "audioSources": metadata.get("audioSources", ""),
             "backgroundImageSource": background_image,
             "coverImageSource": cover_image,
-            "headerAttributionImage": metadata.get("headerAttributionImage", ""),
+            "headerAttributionImage": bell.logo_url() or metadata.get("headerAttributionImage", ""),
             "headerTitle": metadata.get("headerTitle", ""),
             "headerSubtitle": metadata.get("headerSubtitle", ""),
             "primaryText": metadata.get("primaryText", ""),
-            "secondaryText": metadata.get("secondaryText", "")
+            "secondaryText": metadata.get("secondaryText", ""),
+            "albumText": metadata.get("albumText", ""),
+            "primaryTextSize": track_time.title_size(metadata.get("primaryText")),
         })
+        # The page's doorbell (see bell.py): where the Show finds the skill on the LAN
+        bell_page = bell.new_page(device_id)
+        page_id = bell_page or secrets.token_hex(8)
+        # its first update must not set these again: a new background flashes
+        images_on(page_id).update(cover=cover_image, background=background_image)
+        main_template_item.update({
+            "bellUrl": bell.base_url() if bell_page else "",
+            "bellPage": page_id,
+        })
+        start_values = _start_values(device_id)
+        main_template_item.update(start_values)
+        # its stream starts with the current track
+        track_time.pages.started(page_id, (track_time.title_key(metadata),
+                                           start_values.get("startOffset"),
+                                           start_values.get("startDuration")))
     except (KeyError, IndexError):
         logging.warning("Could not update mainTemplate in APL document")
 
@@ -91,7 +175,7 @@ def add_apl(response_builder, start_paused=False):
     )
 
 
-def _get_metadata():
+def _get_metadata(device_id=None):
     """Get metadata from shared_store or data.info.
 
     shared_store is the primary source (set by MA push-url).
@@ -100,8 +184,9 @@ def _get_metadata():
     # Priority 1: shared_store (most reliable, set by MA)
     try:
         import shared_store
-        if shared_store._store:
-            store = shared_store._store
+        from . import device_mapping
+        store = shared_store.for_player(device_mapping.get_player_for_device(device_id))
+        if store:
             return {
                 "audioSources": store.get("streamUrl", ""),
                 "backgroundImageSource": store.get("imageUrl", ""),
@@ -110,7 +195,8 @@ def _get_metadata():
                 "headerTitle": "",
                 "headerSubtitle": "",
                 "primaryText": store.get("title", ""),
-                "secondaryText": _build_secondary_text(store)
+                "secondaryText": store.get("artist", ""),
+                "albumText": store.get("album", ""),
             }
     except Exception as e:
         logging.debug("shared_store read failed in APL: %s", e)
@@ -123,16 +209,3 @@ def _get_metadata():
         pass
 
     return None
-
-
-def _build_secondary_text(store):
-    """Build secondary text from artist and album."""
-    artist = store.get("artist", "")
-    album = store.get("album", "")
-    if artist and album:
-        return f"{artist} - {album}"
-    elif artist:
-        return artist
-    elif album:
-        return album
-    return ""

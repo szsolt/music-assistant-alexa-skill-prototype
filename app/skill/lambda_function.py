@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import threading
+import time
+from concurrent import futures
+from concurrent.futures import ThreadPoolExecutor
 import gettext
 import os
 from ask_sdk.standard import StandardSkillBuilder
@@ -11,7 +15,8 @@ from ask_sdk_core.utils import is_request_type, is_intent_name
 from ask_sdk_core.handler_input import HandlerInput
 from ask_sdk_model import Response
 
-from . import data, util, device_mapping, ma_control
+from . import (data, util, device_mapping, live_page, ma_control, track_time, bell, apl, ma_voice, sleep_timer,
+               voice_commands, voice_match)
 
 sb = StandardSkillBuilder()
 # sb = StandardSkillBuilder(
@@ -88,7 +93,11 @@ logging.basicConfig(
     datefmt="%H:%M:%S %Y-%m-%d %z"
 )
 
-supports_apl = False
+
+def _supports_apl(handler_input):
+    """Whether the requesting device renders APL (set per request by the interceptor)."""
+    return bool(handler_input.attributes_manager.request_attributes.get("supports_apl"))
+
 
 def _get_stream_url(request):
     """Return (url, audio_data) where url is resolved from util.audio_data.
@@ -157,13 +166,20 @@ class SkillEventHandler(AbstractRequestHandler):
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
         logger.info("In SkillEventHandler")
+        _page_heard_from(handler_input)
         # A response Alexa rejects (e.g. an invalid Play URL) only shows up here:
         # the Echo just says there was a problem with the skill's response.
         req = handler_input.request_envelope.request
         if getattr(req, 'reason', None) or getattr(req, 'error', None):
             logger.warning("Session ended: reason=%s error=%s",
                            getattr(req, 'reason', None), getattr(req, 'error', None))
+        if _alexa_broke_off(req) and _supports_apl(handler_input) and util.apl_enabled():
+            _reopen_later(_device_id_from(handler_input))
         return handler_input.response_builder.response
+
+
+_NOTHING_TO_PLAY_MSG = ("Music Assistant has nothing to play on this device yet. "
+                        "Start a song for it in Music Assistant.")
 
 
 class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
@@ -178,6 +194,36 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
         logger.info("In LaunchRequestOrPlayAudioHandler")
 
         _ = handler_input.attributes_manager.request_attributes["_"]
+        device_id = _device_id_from(handler_input)
+        device_mapping.pair_if_waiting(device_id)
+        import shared_store
+        if device_mapping.is_another_echos_stream(device_id, (shared_store._store or {}).get('playerId')):
+            handler_input.response_builder.speak(
+                _(data.UNPAIRED_ECHO_MSG)).set_should_end_session(True)
+            return handler_input.response_builder.response
+        # "Alexa, open music assistant": MA sends a new stream at its own
+        # position, paused or playing. Replaying the stored URL makes MA
+        # restart that flow where it first started it, while MA's clock (and
+        # with it track time and the next title) runs on from the old start.
+        # PlayAudio is MA itself sending a new stream: play that.
+        if (is_request_type("LaunchRequest")(handler_input)
+                and _resume_through_ma(handler_input) == "ok"):
+            return handler_input.response_builder.set_should_end_session(True).response
+        # MA had nothing to resume for this Echo's player. The stored stream
+        # is then the latest of any player: another player's old stream
+        # shows its album and plays nothing.
+        if (is_request_type("LaunchRequest")(handler_input)
+                and device_mapping.is_other_players_stream(
+                    device_id, (shared_store._store or {}).get('playerId'))):
+            handler_input.response_builder.speak(_NOTHING_TO_PLAY_MSG).set_should_end_session(True)
+            return handler_input.response_builder.response
+        # Unless MA sent none just now and is paused: then someone said
+        # "play", and the page alone would play while MA stays paused. Resume
+        # MA as for "resume", on the open page.
+        if not is_request_type("LaunchRequest")(handler_input) and _said_play(device_id):
+            result = _stream_reply(handler_input, lambda: _resume_through_ma(handler_input))
+            if not isinstance(result, str):
+                return result
         request = handler_input.request_envelope.request
         url, _audio = _get_stream_url(request)
         logger.info("URL from util.audio_data: %s", url)
@@ -194,18 +240,165 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
 
         if not url:
             logger.warning("No streamUrl available for Launch/Play request")
-            handler_input.response_builder.speak(
-                "Sorry, I could not retrieve the latest music stream from the API. Please check your setup.").set_should_end_session(True)
+            handler_input.response_builder.speak(_NOTHING_TO_PLAY_MSG).set_should_end_session(True)
             return handler_input.response_builder.response
 
         logger.info("Playing URL: %s", url)
-        return util.play(
+        started = time.monotonic()
+        response = util.play(
             url=url,
             offset=0,
             text=data.WELCOME_MSG,
             response_builder=handler_input.response_builder,
-            supports_apl=supports_apl
+            supports_apl=_supports_apl(handler_input),
+            device_id=_device_id_from(handler_input)
         )
+        # Alexa drops a response that takes over ~8 s: then the page never
+        # shows, or shows without ever sending a refresh.
+        logger.info("Player page response built in %d ms (APL: %s)",
+                    (time.monotonic() - started) * 1000, _supports_apl(handler_input))
+        # Only a page sends events that cancel the watchdog.
+        if _supports_apl(handler_input) and util.apl_enabled():
+            live_page.closed(_device_id_from(handler_input))
+            _watch_page(_device_id_from(handler_input))
+        return response
+
+
+# MA speaks "play audio" to the Echo about a second after sending its stream.
+_MA_PLAY_SECONDS = 5
+
+
+def _said_play(device_id):
+    """A PlayAudio that isn't MA's: MA is paused and sent no stream just now."""
+    import shared_store
+    player_id = device_mapping.get_player_for_device(device_id)
+    return bool(player_id) and not shared_store.sent_since(player_id, _MA_PLAY_SECONDS) \
+        and ma_control.is_paused(player_id)
+
+
+# A working player page sends its first refresh 2-4 s after it opens. After
+# a few minutes of idle the Show's first page sometimes shows but neither
+# plays nor sends a single event, until it closes ~30 s later. MA sending
+# the stream again (as a skip in MA does) brings up a page that works.
+_PAGE_WATCHDOG_S = 10
+# A page with a bell is heard over the LAN instead. After an idle night the
+# Show can hold its image loads, bell included, for ~10 s while the video
+# already plays. A bell that says "playing" stops the watchdog.
+_BELL_PAGE_WATCHDOG_S = 20
+# At most one resend per this long per Echo, so a Show that keeps failing
+# doesn't loop.
+_PAGE_RESEND_PAUSE_S = 60
+_page_watch = {}        # device_id -> Timer
+_page_resent_at = {}    # device_id -> time.monotonic()
+_page_watch_lock = threading.Lock()
+
+
+def _watch_page(device_id):
+    """Have MA resend the stream if the page just sent sends no event in time."""
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        return
+    wait = _BELL_PAGE_WATCHDOG_S if bell.has_page(device_id) else _PAGE_WATCHDOG_S
+
+    def check():
+        with _page_watch_lock:
+            if _page_watch.get(device_id) is not timer:
+                return
+            del _page_watch[device_id]
+            last = _page_resent_at.get(device_id)
+            if last is not None and time.monotonic() - last < _PAGE_RESEND_PAUSE_S:
+                logger.warning("Player page on %s sent no event in %d s; resent recently, leaving it",
+                               player_id, wait)
+                return
+            _page_resent_at[device_id] = time.monotonic()
+        result = ma_control.get_current_track_time(player_id)
+        if not result or result[2]:
+            return   # MA has nothing to play, or is paused: a resend would play it
+        logger.warning("Player page on %s sent no event in %d s: asking MA to resend the stream",
+                       player_id, wait)
+        if ma_control.resume_at(player_id) is None:
+            logger.warning("MA did not resend the stream for %s", player_id)
+
+    timer = threading.Timer(wait, check)
+    timer.daemon = True
+    with _page_watch_lock:
+        old = _page_watch.pop(device_id, None)
+        _page_watch[device_id] = timer
+    if old:
+        old.cancel()
+    timer.start()
+
+
+# Alexa ends the session with its own error when it handles a request
+# itself while the page is open ("set volume to 2"). The page closes and
+# the music stops, though nobody asked for that. The skill asks MA to
+# resend the stream, which brings the page back. The delay lets Alexa
+# finish its own reply first.
+_REOPEN_DELAY_S = 2
+# At most one reopen per this long per Echo, so an Echo that keeps failing
+# doesn't loop.
+_REOPEN_PAUSE_S = 60
+_reopened_at = {}       # device_id -> time.monotonic()
+
+
+def _alexa_broke_off(request):
+    """True if Alexa ended the session with its own error, not one of the skill's."""
+    error = getattr(request, 'error', None)
+    kind = getattr(error, 'object_type', None) or getattr(error, 'type', None)
+    return (getattr(request, 'object_type', None) == "SessionEndedRequest"
+            and getattr(kind, 'value', kind) == "INTERNAL_SERVICE_ERROR")
+
+
+def _reopen_later(device_id):
+    """Have MA resend the stream to device_id after _REOPEN_DELAY_S, if MA still plays to it."""
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        return
+
+    def reopen():
+        # Not bell.has_page: the closed page stays on its books for a while.
+        if live_page.is_live(device_id):
+            logger.info("Alexa closed the page on %s; a new one has come, leaving it", player_id)
+            return
+        state = ma_control.get_queue_state(player_id)
+        if not state or state[0] != "playing":
+            logger.info("Alexa closed the page on %s; MA isn't playing, leaving it", player_id)
+            return
+        if any(d != device_id for d in device_mapping.get_devices_for_player(player_id)):
+            logger.info("Alexa closed the page on %s; its MA player has other Echos, leaving it", player_id)
+            return
+        now = time.monotonic()
+        with _page_watch_lock:
+            last = _reopened_at.get(device_id)
+            if last is not None and now - last < _REOPEN_PAUSE_S:
+                logger.warning("Alexa closed the page on %s again; reopened recently, leaving it", player_id)
+                return
+            _reopened_at[device_id] = now
+        logger.warning("Alexa closed the page on %s while MA plays: reopening it", player_id)
+        # Where MA is now: a position saved at an older pause would rewind.
+        if _resume_for(device_id, state[1]) != "ok":
+            logger.warning("MA did not resend the stream for %s", player_id)
+
+    timer = threading.Timer(_REOPEN_DELAY_S, reopen)
+    timer.daemon = True
+    timer.start()
+
+
+def _page_heard_from(handler_input):
+    """The Echo's page sent an event or closed: no resend needed."""
+    if not is_request_type("Alexa.Presentation.APL.UserEvent")(handler_input):
+        # On a SessionEnded nothing else tells MA the page missed its hand-off.
+        live_page.closed(_device_id_from(handler_input),
+                         fall_back=is_request_type("SessionEndedRequest")(handler_input))
+    _page_plays(_device_id_from(handler_input))
+
+
+def _page_plays(device_id):
+    """The page on device_id is alive: stop its watchdog."""
+    with _page_watch_lock:
+        timer = _page_watch.pop(device_id, None)
+    if timer:
+        timer.cancel()
 
 
 class HelpIntentHandler(AbstractRequestHandler):
@@ -219,9 +412,7 @@ class HelpIntentHandler(AbstractRequestHandler):
         logger.info("In HelpIntentHandler")
         _ = handler_input.attributes_manager.request_attributes["_"]
         handler_input.response_builder.speak(
-            _(data.HELP_MSG).format(
-                util.audio_data(
-                    handler_input.request_envelope.request))
+            _(data.HELP_MSG).format(_SKILL_NAME)
         ).set_should_end_session(False)
         return handler_input.response_builder.response
 
@@ -242,10 +433,15 @@ class UnhandledIntentHandler(AbstractRequestHandler):
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
         logger.info("In UnhandledIntentHandler")
-        _ = handler_input.attributes_manager.request_attributes["_"]
-        handler_input.response_builder.speak(
-            _(data.UNHANDLED_MSG)).set_should_end_session(True)
-        return handler_input.response_builder.response
+        # With the player page open this was most likely meant for Alexa
+        # ("turn off the light"): stay quiet and keep the page.
+        return _ignore(handler_input)
+
+
+def _ignore(handler_input):
+    """Says nothing with the player page open, or that it didn't understand without one."""
+    _ = handler_input.attributes_manager.request_attributes["_"]
+    return _speak(handler_input, None, if_closed=_(data.UNHANDLED_MSG))
 
 
 def _device_id_from(handler_input):
@@ -255,15 +451,20 @@ def _device_id_from(handler_input):
         return None
 
 
-def _sync_to_ma_unless_echo(handler_input, command):
+def _sync_to_ma_unless_echo(handler_input, command, unless_paused=False):
+    _sync_device_to_ma(_device_id_from(handler_input), command, unless_paused)
+
+
+def _sync_device_to_ma(device_id, command, unless_paused=False):
     """Best-effort: forward pause/stop/resume to MA, unless this request is
     the echo of a command we ourselves just triggered on MA (see ma_control
     docstring for why that echo happens and must be suppressed once).
 
     Always lets the caller's normal Alexa-side action proceed regardless of
     outcome here - this is a secondary sync, not the primary response.
+
+    unless_paused: leave a paused MA as it is (see CancelOrStopIntentHandler).
     """
-    device_id = _device_id_from(handler_input)
 
     if ma_control.is_echo_of_ma_command(device_id, command):
         logger.info("Suppressing MA %s: echo of our own MA-triggered command for device_id=%s", command, device_id)
@@ -272,10 +473,32 @@ def _sync_to_ma_unless_echo(handler_input, command):
     player_id = device_mapping.get_player_for_device(device_id)
     if not player_id:
         return
+    if unless_paused and ma_control.is_paused(player_id):
+        logger.info("Not sending %s to MA player %s: it is paused", command, player_id)
+        return
 
     ma_control.mark_ma_triggered(device_id, command)
     if not ma_control.send_player_command(player_id, command):
         logger.warning("Failed to sync %s to MA player %s", command, player_id)
+
+
+def _next_or_previous_to_ma(handler_input, command):
+    return _next_or_previous_for(_device_id_from(handler_input), command)
+
+
+def _next_or_previous_for(device_id, command):
+    """Send next/previous to the MA player paired with this Echo.
+
+    Returns "ok", "unmapped" (Echo not paired in /devices) or "failed".
+    MA then pushes the new stream (see _stream_reply).
+    """
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        logger.warning("No MA player mapped for device_id=%s", device_id)
+        return "unmapped"
+    if not ma_control.send_player_command(player_id, command):
+        return "failed"
+    return "ok"
 
 
 class NextOrPreviousIntentHandler(AbstractRequestHandler):
@@ -298,20 +521,16 @@ class NextOrPreviousIntentHandler(AbstractRequestHandler):
         intent_name = handler_input.request_envelope.request.intent.name
         command = "next" if intent_name == "AMAZON.NextIntent" else "previous"
 
-        device_id = _device_id_from(handler_input)
-        player_id = device_mapping.get_player_for_device(device_id)
-        if not player_id:
-            logger.warning("No MA player mapped for device_id=%s", device_id)
+        result = _stream_reply(handler_input, lambda: _next_or_previous_to_ma(handler_input, command))
+        if not isinstance(result, str):
+            return result
+        if result == "unmapped":
             handler_input.response_builder.speak(
                 _(data.DEVICE_NOT_MAPPED_MSG)).set_should_end_session(True)
             return handler_input.response_builder.response
 
-        if not ma_control.send_player_command(player_id, command):
-            handler_input.response_builder.speak(
-                _(data.MA_COMMAND_FAILED_MSG)).set_should_end_session(True)
-            return handler_input.response_builder.response
-
-        handler_input.response_builder.set_should_end_session(True)
+        handler_input.response_builder.speak(
+            _(data.MA_COMMAND_FAILED_MSG)).set_should_end_session(True)
         return handler_input.response_builder.response
 
 
@@ -325,9 +544,13 @@ class CancelOrStopIntentHandler(AbstractRequestHandler):
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
         logger.info("In CancelOrStopIntentHandler")
+        _page_heard_from(handler_input)
         _ = handler_input.attributes_manager.request_attributes["_"]
-        _sync_to_ma_unless_echo(handler_input, "stop")
-        return util.stop(_(data.STOP_MSG), handler_input.response_builder, supports_apl=supports_apl)
+        # The Show closes a paused page after ~30 s and then sends this Stop.
+        # MA stays paused: play in MA then resumes through us at the paused
+        # position, where a stopped MA would start a stream we can't place.
+        _sync_to_ma_unless_echo(handler_input, "stop", unless_paused=True)
+        return util.stop(_(data.STOP_MSG), handler_input.response_builder, supports_apl=_supports_apl(handler_input))
 
 
 class PauseIntentHandler(AbstractRequestHandler):
@@ -348,8 +571,9 @@ class PauseIntentHandler(AbstractRequestHandler):
 
         return util.pause(text=None,
                   response_builder=handler_input.response_builder,
-                  supports_apl=supports_apl,
-                  session_new=session_new)
+                  supports_apl=_supports_apl(handler_input),
+                  session_new=session_new,
+                  device_id=_device_id_from(handler_input))
 
 
 class ResumeIntentHandler(AbstractRequestHandler):
@@ -364,7 +588,13 @@ class ResumeIntentHandler(AbstractRequestHandler):
         request = handler_input.request_envelope.request
         _ = handler_input.attributes_manager.request_attributes["_"]
 
-        _sync_to_ma_unless_echo(handler_input, "resume")
+        # Voice "Alexa, resume", or play in MA's UI (which MA's provider
+        # speaks as this intent): MA builds a new stream from the paused
+        # position, and this reply plays it; the old URL would start the
+        # track over.
+        result = _stream_reply(handler_input, lambda: _resume_through_ma(handler_input))
+        if not isinstance(result, str):
+            return result
 
         url, _audio = _get_stream_url(request)
         if not url:
@@ -380,7 +610,8 @@ class ResumeIntentHandler(AbstractRequestHandler):
             offset=offset,
             text=data.WELCOME_MSG,
             response_builder=handler_input.response_builder,
-            supports_apl=supports_apl
+            supports_apl=_supports_apl(handler_input),
+            device_id=_device_id_from(handler_input)
         )
 
 
@@ -417,7 +648,7 @@ class StartOverIntentHandler(AbstractRequestHandler):
 
 
 class LoopOrShuffleIntentHandler(AbstractRequestHandler):
-    """Handler for loop on/off, shuffle on/off intent."""
+    """Shuffle on/off and repeat (loop) on/off, on the paired MA player's queue."""
     def can_handle(self, handler_input):
         # type: (HandlerInput) -> bool
         return (is_intent_name("AMAZON.LoopOnIntent")(handler_input) or
@@ -428,10 +659,336 @@ class LoopOrShuffleIntentHandler(AbstractRequestHandler):
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
         logger.info("In LoopOrShuffleIntentHandler")
-
         _ = handler_input.attributes_manager.request_attributes["_"]
-        speech = _(data.NOT_POSSIBLE_MSG)
-        return handler_input.response_builder.speak(speech).response
+        name = handler_input.request_envelope.request.intent.name
+        on = name.endswith("OnIntent")
+
+        def run(player_id):
+            if "Shuffle" in name:
+                ma_voice.set_shuffle(player_id, on)
+                speech = _(data.SHUFFLE_ON_MSG if on else data.SHUFFLE_OFF_MSG)
+            else:
+                ma_voice.set_repeat(player_id, on)
+                speech = _(data.REPEAT_ON_MSG if on else data.REPEAT_OFF_MSG)
+            # The page's buttons and its next song follow.
+            bell.send(_device_id_from(handler_input), ("modes", None))
+            return speech
+        return _voice_reply(handler_input, run)
+
+
+# How long a voice command waits for MA's new stream, to answer with it
+# in one reply. Alexa drops a reply that takes over ~8 s.
+_VOICE_WAIT_S = 5
+_VOICE_DEADLINE_S = 6.5
+
+
+class _PlayFailed(Exception):
+    """MA refused to play it; carries what to say."""
+
+
+def _voice_reply(handler_input, run):
+    """The reply for run(player_id): words to say, or a finished reply.
+
+    MA's errors become their own answers.
+    """
+    _ = handler_input.attributes_manager.request_attributes["_"]
+    player_id = device_mapping.get_player_for_device(_device_id_from(handler_input))
+    if not player_id:
+        speech = _(data.UNPAIRED_ECHO_MSG)
+    else:
+        try:
+            speech = run(player_id)
+        except _PlayFailed as e:
+            logger.warning("Voice command: MA refused to play it: %s", e.__cause__)
+            speech = str(e)
+        except ma_voice.MAUnavailable as e:
+            logger.warning("Voice command: MA unreachable: %s", e)
+            speech = _(data.MA_UNAVAILABLE_MSG)
+        except ma_voice.MAFailed as e:
+            logger.warning("Voice command: MA refused it: %s", e)
+            speech = _(data.MA_COMMAND_FAILED_MSG)
+    if not isinstance(speech, str):
+        return speech
+    return _speak(handler_input, speech)
+
+
+def _speak(handler_input, speech, commands=(), if_closed=None):
+    """A reply, spoken or silent, that keeps an open player page.
+
+    Ending the session closes the page (or leaves it stuck), so with the
+    page open the session stays as it is, as for next and previous, and
+    a page without a doorbell gets its next refresh. speech None says
+    nothing; if_closed is said instead when no page is open.
+    """
+    builder = handler_input.response_builder
+    device_id = _device_id_from(handler_input)
+    if not (live_page.is_live(device_id) and _supports_apl(handler_input) and util.apl_enabled()):
+        if speech or if_closed:
+            builder.speak(speech or if_closed)
+        return builder.set_should_end_session(True).response
+    if speech:
+        builder.speak(speech)
+    commands = list(commands)
+    if not bell.has_page(device_id):
+        commands += util.apl_refresh_commands()
+    util.execute_apl_commands(builder, commands)
+    return builder.set_should_end_session(None).response
+
+
+def _wait_for_stream(device_id, seconds):
+    """MA's new stream for device_id's Echo, handed over within seconds, or None."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        taken = live_page.take(device_id, "stream", for_reply=True)
+        if taken:
+            return taken[1]
+        time.sleep(0.1)
+    return None
+
+
+def _play_and_answer(handler_input, started, start, speech):
+    """Start new music in MA and answer with its stream, in one reply.
+
+    MA pushes the new stream for the Echo. With the Echo marked live it
+    takes that as a hand-off and leaves out its spoken "play audio", so
+    this reply plays the stream and shows the page. This holds for an open
+    page too: the stream is claimed for the reply, so the old page can't
+    take it and be left stuck behind a spoken reply. If MA is too slow, the hand-off falls
+    back to MA's spoken way and the reply only speaks.
+    """
+    device_id = _device_id_from(handler_input)
+    live_page.closed(device_id)
+    live_page.heard_from(device_id)
+    live_page.claim(device_id)
+    try:
+        start()
+    except Exception:
+        live_page.closed(device_id)
+        raise
+    url = _wait_for_stream(device_id, min(_VOICE_WAIT_S, _VOICE_DEADLINE_S - (time.monotonic() - started)))
+    if url is None:
+        logger.info("No stream from MA in time, MA starts it the spoken way")
+        live_page.closed(device_id, fall_back=True)
+        if speech:
+            handler_input.response_builder.speak(speech)
+        return handler_input.response_builder.set_should_end_session(True).response
+    response = util.play(url=url, offset=0, text=speech,
+                         response_builder=handler_input.response_builder,
+                         supports_apl=_supports_apl(handler_input), device_id=device_id)
+    if _supports_apl(handler_input) and util.apl_enabled():
+        live_page.closed(device_id)
+        _watch_page(device_id)
+    return response
+
+
+class FavoriteHandler(AbstractRequestHandler):
+    """"Like this song", "remove this album from my favourites"."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        request = handler_input.request_envelope.request
+        return (is_request_type("IntentRequest")(handler_input)
+                and request.intent.name in voice_commands.FAVORITE_INTENTS)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        _ = handler_input.attributes_manager.request_attributes["_"]
+        intent = handler_input.request_envelope.request.intent
+        kind = voice_commands.favorite_kind(intent.slots)
+        if kind is None:
+            return UnhandledIntentHandler().handle(handler_input)
+        on = voice_commands.FAVORITE_INTENTS[intent.name]
+        logger.info("Voice command %s: %s", intent.name, kind)
+        player_id = device_mapping.get_player_for_device(_device_id_from(handler_input))
+        if not player_id:
+            return _speak(handler_input, _(data.DEVICE_NOT_MAPPED_MSG))
+        try:
+            result = ma_voice.set_favorite(player_id, kind, on)
+        except (ma_voice.MAUnavailable, ma_voice.MAFailed) as e:
+            logger.warning("MA didn't change the favourite: %s", e)
+            return _speak(handler_input, _(data.MA_COMMAND_FAILED_MSG))
+        if result is None:
+            return _speak(handler_input, _(data.NOTHING_TO_FAVORITE_MSG))
+        message = data.FAVORITE_ADDED_MSG if on else data.FAVORITE_REMOVED_MSG
+        return _speak(handler_input, _(message).format(result[0]),
+                      _favorite_commands(_favorites_of(player_id)))
+
+
+class _NotStarted(Exception):
+    """MA didn't take the command (_stream_reply)."""
+
+
+def _stream_reply(handler_input, send):
+    """Ask MA for a new stream with send(), and answer with it in one reply.
+
+    As for voice commands: an open page plays the new stream instead of
+    being closed and opened again. send() returns "ok", "unmapped" or
+    "failed"; anything but "ok" is returned as is, else the response.
+    """
+    result = []
+
+    def start():
+        result.append(send())
+        if result[-1] != "ok":
+            raise _NotStarted
+
+    try:
+        return _play_and_answer(handler_input, time.monotonic(), start, None)
+    except _NotStarted:
+        return result[-1]
+
+
+class VoicePlayHandler(AbstractRequestHandler):
+    """Play artist/album/song/playlist/anything, radio, queue and play next."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        request = handler_input.request_envelope.request
+        return (is_request_type("IntentRequest")(handler_input)
+                and request.intent.name in voice_commands.INTENTS)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        started = time.monotonic()
+        _ = handler_input.attributes_manager.request_attributes["_"]
+        intent = handler_input.request_envelope.request.intent
+        wanted = voice_commands.request_of(intent.name, intent.slots)
+        logger.info("Voice command %s: heard %r, by %r", intent.name, wanted["heard"], wanted["artist"])
+        if not wanted["meant"]:
+            # No "play"/"shuffle" or kind word: Alexa forced another request
+            # ("set volume to 2") into this one.
+            logger.info("Voice command %s: no play or kind word, ignoring it", intent.name)
+            return _ignore(handler_input)
+        if not wanted["heard"]:
+            # Asked once: the session stays open for the answer.
+            return (handler_input.response_builder.speak(_(data.WHAT_TO_PLAY_MSG))
+                    .ask(_(data.WHAT_TO_PLAY_MSG)).response)
+
+        def run(player_id):
+            match, score = ma_voice.find(wanted["heard"], wanted["kinds"], wanted["artist"])
+            if not match:
+                logger.info("Voice command: no match for %r (best score %.2f)", wanted["heard"], score)
+                return _(data.NOT_FOUND_MSG).format(wanted["heard"])
+            logger.info("Voice command: %r -> %s %r by %r (score %.2f, %s)", wanted["heard"], match["kind"],
+                        match["name"], match["artist"], score,
+                        "library" if match["from_library"] else "providers")
+            speech = voice_commands.answer(_, wanted, match)
+
+            def start():
+                try:
+                    ma_voice.play(player_id, match["uri"], wanted["option"], wanted["shuffle"], wanted["radio"])
+                except ma_voice.MAFailed as e:
+                    raise _PlayFailed(_(data.PLAY_FAILED_MSG).format(match["name"])) from e
+            if wanted["option"] != "replace":
+                start()
+                return speech
+            return _play_and_answer(handler_input, started, start, speech)
+        return _voice_reply(handler_input, run)
+
+
+class PlayRandomHandler(AbstractRequestHandler):
+    """Shuffle my library / play something random."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        return is_intent_name("PlayRandom")(handler_input)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        logger.info("In PlayRandomHandler")
+        started = time.monotonic()
+        _ = handler_input.attributes_manager.request_attributes["_"]
+
+        def run(player_id):
+            def start():
+                if not ma_voice.play_random(player_id):
+                    raise _PlayFailed(_(data.EMPTY_LIBRARY_MSG))
+            return _play_and_answer(handler_input, started, start, _(data.RANDOM_MSG))
+        return _voice_reply(handler_input, run)
+
+
+class WhatsPlayingHandler(AbstractRequestHandler):
+    """What's playing: title and artist from MA."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        return is_intent_name("WhatsPlaying")(handler_input)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        logger.info("In WhatsPlayingHandler")
+        _ = handler_input.attributes_manager.request_attributes["_"]
+
+        def run(player_id):
+            playing = ma_voice.now_playing(player_id)
+            if not playing:
+                return _(data.NOTHING_PLAYING_MSG)
+            title, artist = playing
+            return _(data.NOW_PLAYING_MSG).format(_(data.BY_MSG).format(title, artist) if artist else title)
+        return _voice_reply(handler_input, run)
+
+class MoveMusicHandler(AbstractRequestHandler):
+    """Move the music to another MA player: "move the music to the kitchen"."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        return is_intent_name("MoveMusic")(handler_input)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        _ = handler_input.attributes_manager.request_attributes["_"]
+        intent = handler_input.request_envelope.request.intent
+        heard = voice_commands.slot_text(intent.slots, "player")
+        logger.info("Move the music: heard %r", heard)
+        if not heard:
+            return _ignore(handler_input)
+        device_id = _device_id_from(handler_input)
+
+        def run(player_id):
+            players = {name: target for target, name in ma_voice.players()}
+            name = heard if heard in players else voice_match.closest(heard, list(players))
+            if not name:
+                logger.info("Move the music: no player like %r", heard)
+                return _(data.NO_PLAYER_MSG).format(heard)
+            if players[name] == player_id:
+                return _(data.ALREADY_THERE_MSG).format(name)
+            logger.info("Move the music: %s -> %s (%r)", player_id, players[name], name)
+            # Close the page first: MA's pause for this Echo must not go to
+            # it as a hand-off, nor be spoken. This Echo stops its stream itself.
+            live_page.closed(device_id)
+            live_page.expect_silent_pause(device_id)
+            ma_voice.move(player_id, players[name])
+            return util.stop(_(data.MOVING_MSG).format(name), handler_input.response_builder)
+        return _voice_reply(handler_input, run)
+
+class SleepTimerHandler(AbstractRequestHandler):
+    """Pause MA after a while: "stop in 30 minutes"."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        return is_intent_name("SleepTimer")(handler_input)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        _ = handler_input.attributes_manager.request_attributes["_"]
+        slot = (handler_input.request_envelope.request.intent.slots or {}).get("duration")
+        seconds = sleep_timer.parse_duration(slot and slot.value)
+        logger.info("Sleep timer: heard %r", slot and slot.value)
+        if not seconds:
+            return _speak(handler_input, _(data.SLEEP_HOW_LONG_MSG))
+        device_id = _device_id_from(handler_input)
+
+        def run(player_id):
+            sleep_timer.start(device_id, seconds, lambda device_id: _sync_device_to_ma(device_id, "pause"))
+            return _(data.SLEEP_SET_MSG).format(sleep_timer.spoken(seconds))
+        return _voice_reply(handler_input, run)
+
+
+class CancelSleepTimerHandler(AbstractRequestHandler):
+    """"Cancel the sleep timer"."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        return is_intent_name("CancelSleepTimer")(handler_input)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        _ = handler_input.attributes_manager.request_attributes["_"]
+        cancelled = sleep_timer.cancel(_device_id_from(handler_input))
+        return _speak(handler_input, _(data.SLEEP_CANCELLED_MSG if cancelled else data.NO_SLEEP_TIMER_MSG))
 
 # ###################################################################
 
@@ -555,7 +1112,8 @@ class PlaybackFailedHandler(AbstractRequestHandler):
             offset=0, 
             text=None,
             response_builder=handler_input.response_builder,
-            supports_apl=supports_apl
+            supports_apl=_supports_apl(handler_input),
+            device_id=_device_id_from(handler_input)
         )
 
 
@@ -578,38 +1136,486 @@ class ExceptionEncounteredHandler(AbstractRequestHandler):
 # ########## APL INTERFACE HANDLERS #################################
 # This section contains handlers related to APL interface
 
-class APLUserEventHandler(AbstractRequestHandler):
-    """Handler for APL UserEvent requests.
+_APL_EVENTS = ("MetadataRefresh", "Next", "Previous", "Pause", "Play", "Seek", "QueueEnded", "Pull",
+               "FavSong", "FavAlbum", "Shuffle", "Repeat", "PlayAlbum")
+# Where a button's event carries its press number (bell.pressed).
+_PRESS_NUMBER_AT = {"Next": 1, "Previous": 1, "Play": 2, "Pause": 2, "Seek": 2, "FavSong": 1, "FavAlbum": 1,
+                    "Shuffle": 1, "Repeat": 1, "PlayAlbum": 1}
+# Favourite buttons: press kind -> what they mark.
+_FAVORITE_PRESSES = {"favsong": "song", "favalbum": "album"}
+# Buttons that set a state; their press carries the state wanted (a number).
+_MODE_PRESSES = ("shuffle", "repeat")
+_UNDO_BUTTON_PRESS = [
+    {"type": "ControlMedia", "componentId": "videoPlayer", "command": "play"},
+    {"type": "SetValue", "componentId": "Busy_Overlay", "property": "opacity", "value": 0},
+    {"type": "SetValue", "componentId": "Busy_Overlay", "property": "display", "value": "none"},
+]
+_track_changes = track_time.pages
 
-    This handles periodic metadata refresh events sent from the APL document.
-    When the APL display sends a UserEvent with eventType='MetadataRefresh',
-    this handler fetches the latest metadata from Music Assistant and sends
-    an updated APL document to refresh the display.
+_SKILL_NAME = "Music Assistant"
+
+# Per Echo, each (title key, ms into the track): where the page was paused,
+# and where MA paused (its elapsed time on the paused page). Where the
+# stream of our last resume starts: (ms into the track, valid until).
+_STREAM_START_TTL_SECONDS = 60
+_paused_at = {}
+_ma_paused_at = {}
+_stream_start = {}
+
+
+def _info_for(device_id):
+    """The metadata of the MA player paired with this Echo (as data.info)."""
+    import shared_store
+    payload = shared_store.for_player(device_mapping.get_player_for_device(device_id))
+    return data.info_from(payload) if payload else data.info
+
+
+def _remember(store, device_id, position_ms):
+    if device_id and position_ms is not None:
+        store[device_id] = (track_time.title_key(_info_for(device_id)), position_ms)
+
+
+def _recall(store, device_id):
+    """The position kept in store for this Echo, if it is for the current track."""
+    entry = store.get(device_id)
+    if entry and entry[0] == track_time.title_key(_info_for(device_id)):
+        return entry[1]
+    return None
+
+
+def _take_stream_start(device_id, keep=False):
+    start, valid_until = (_stream_start.get if keep else _stream_start.pop)(device_id, (None, 0))
+    return start if valid_until >= time.time() else None
+
+
+def _resume_through_ma(handler_input, position_ms=None):
+    return _resume_for(_device_id_from(handler_input), position_ms)
+
+
+def _resume_for(device_id, position_ms=None):
+    """Resume MA at position_ms, else where the page or MA paused.
+
+    Returns "ok", "unmapped" or "failed". MA pushes a new stream from that
+    position and relaunches the skill, as for next/previous.
+    """
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        logger.info("No MA player mapped for device_id=%s", (device_id or '')[-8:])
+        return "unmapped"
+    if position_ms is None:
+        position_ms = _recall(_paused_at, device_id)
+    start = ma_control.resume_at(player_id, position_ms)
+    if start is None:
+        return "failed"
+    _paused_at.pop(device_id, None)
+    _ma_paused_at.pop(device_id, None)
+    _stream_start[device_id] = (start, time.time() + _STREAM_START_TTL_SECONDS)
+    logger.info("Resuming %s at %s ms", player_id, start)
+    return "ok"
+
+
+def _apl_event_arguments(handler_input):
+    try:
+        return list(getattr(handler_input.request_envelope.request, 'arguments', None) or [])
+    except Exception:
+        return []
+
+
+def _session_id_from(handler_input):
+    session = getattr(handler_input.request_envelope, 'session', None)
+    return getattr(session, 'session_id', None) or _device_id_from(handler_input)
+
+
+# Where a page's events carry its id (the skill gives every page one, see apl.py).
+_PAGE_ID_AT = {"Pull": 4, "MetadataRefresh": 3}
+
+
+def _page_key(handler_input, arguments):
+    """The page an event comes from: its id, or (a page from before page ids) the session."""
+    index = _PAGE_ID_AT.get(arguments[0]) if arguments else None
+    if index is not None and len(arguments) > index and arguments[index]:
+        return str(arguments[index])
+    return _session_id_from(handler_input)
+
+
+def _track_time_commands(handler_input, arguments, page_key, info):
+    """SetValue commands for trackOffset/trackDuration, or [] if unneeded.
+
+    Only on a track change (or the first refresh of a new page): MA is
+    asked once, and the page counts from its own video position after that.
+    Kept per page (page_key), so a new page always starts afresh.
+    """
+    key = track_time.track_key(info)
+    if not _track_changes.changed(page_key, key):
+        return []
+    session_id = page_key
+    player_id = device_mapping.get_player_for_device(_device_id_from(handler_input))
+    if not player_id:
+        return []
+    device_id = _device_id_from(handler_input)
+    result = ma_control.get_current_track_time(player_id)
+    duration_ms, elapsed_ms, paused, last, upcoming, quality = (
+        result if result else (None, None, False, False, None, ""))
+    position_ms = track_time.video_position_ms(arguments)
+    previous_end = _track_changes.previous_end(session_id)
+    if previous_end == 0:   # a new page
+        offset = track_time.page_start_offset_ms(position_ms, paused, _recall(_paused_at, device_id),
+                                                 elapsed_ms, _take_stream_start(device_id),
+                                                 _recall(_ma_paused_at, device_id))
+        if paused:
+            _remember(_ma_paused_at, device_id, elapsed_ms)
+        else:
+            _paused_at.pop(device_id, None)
+            _ma_paused_at.pop(device_id, None)
+    else:
+        # right after the page's first track, MA's clock still holds the page's start delay
+        measure = not _track_changes.past_start(session_id)
+        offset = track_time.choose_offset_ms(previous_end, position_ms if measure else None,
+                                             elapsed_ms)
+    _track_changes.record(session_id, offset, duration_ms, last)
+    logger.info("Track time for %s: duration=%s ms elapsed=%s ms paused=%s offset=%s ms last=%s next=%s",
+                player_id, duration_ms, elapsed_ms, paused, offset, last,
+                upcoming and (upcoming["duration_ms"], bool(upcoming["image"])))
+    shown = (position_ms or 0) - offset if paused and offset is not None else None
+    upcoming = _with_ma_hostname(upcoming)
+    _images_on(page_key)["next"] = (upcoming or {}).get("image") or None
+    return track_time.new_page_only_last(
+        track_time.set_track_time_commands(offset, duration_ms, shown,
+                                           _track_changes.queue_end_ms(session_id), upcoming,
+                                           quality)
+        + _favorite_commands(_favorites_of(player_id))
+        + _mode_commands(_modes_of(player_id)))
+
+
+def _images_on(page_key):
+    """The images on that page, as util.update_apl_metadata keeps them."""
+    return apl.images_on(page_key)
+
+
+def _with_ma_hostname(upcoming):
+    """upcoming with its image on MA's public hostname, as the current track's (util)."""
+    if not upcoming or not upcoming.get("image"):
+        return upcoming
+    try:
+        hostname = util.get_ma_hostname(raise_on_http_scheme=False)
+    except ValueError:
+        hostname = ''
+    if not hostname:
+        return upcoming
+    return dict(upcoming, image=util.replace_ip_in_url(upcoming["image"], hostname))
+
+
+def _start_track_time(device_id):
+    """(offset ms, duration ms) for a page the skill builds now, or None.
+
+    As the page's first refresh works it out (_track_time_commands), with
+    the video at 0. The refresh still does, and sets the same values.
+    """
+    player_id = device_mapping.get_player_for_device(device_id)
+    result = ma_control.get_current_track_time(player_id) if player_id else None
+    if not result:
+        return None
+    duration_ms, elapsed_ms, paused = result[:3]
+    offset = track_time.page_start_offset_ms(0, paused, _recall(_paused_at, device_id), elapsed_ms,
+                                             _take_stream_start(device_id, keep=True),
+                                             _recall(_ma_paused_at, device_id))
+    return offset, duration_ms
+
+
+apl.set_start_track_time(_start_track_time)
+
+
+def _press(device_id, kind, position_ms=None):
+    """Do what the page's button asks (pause, play, next, previous, seek), from either path.
+
+    False if the page should undo its press: MA won't send a new stream.
+    Pause: remember where, and pause MA. The page pauses itself; MA's pause
+    hand-off isn't needed (or, unpatched, MA makes the Echo hear "pause",
+    which reopens the page paused).
+    """
+    if kind in _FAVORITE_PRESSES:
+        _favorite_press(device_id, _FAVORITE_PRESSES[kind], bool(position_ms))
+        return True
+    if kind in _MODE_PRESSES:
+        _mode_press(device_id, kind, position_ms or 0)
+        return True
+    if kind == "playalbum":
+        return _play_album_for(device_id)
+    if kind == "pause":
+        logger.info("APL pause button at %s ms", position_ms)
+        _remember(_paused_at, device_id, position_ms)
+        _sync_device_to_ma(device_id, "pause")
+        live_page.take(device_id, "pause")
+        return True
+    if kind == "play":
+        logger.info("APL play button at %s ms", position_ms)
+        return _resume_for(device_id, position_ms) == "ok"
+    if kind == "seek":
+        # MA plays from there, also when it was paused: like a play at that position.
+        logger.info("APL seek to %s ms", position_ms)
+        return position_ms is not None and _resume_for(device_id, position_ms) == "ok"
+    logger.info("APL %s button", kind)
+    return _next_or_previous_for(device_id, kind) == "ok"
+
+
+def _lan_press(device_id, kind, position_ms):
+    """A button press that came over the LAN, through the page's bell (bell.py)."""
+    if kind in _FAVORITE_PRESSES or kind in _MODE_PRESSES:
+        _press(device_id, kind, position_ms)
+    elif kind in ("pause", "play", "next", "previous", "seek", "playalbum") and not _press(device_id, kind, position_ms):
+        bell.undo(device_id)
+
+
+def _favorites_of(player_id):
+    """MA's favourite flags for what plays ({"song", "album"}), or {} if MA can't say."""
+    try:
+        return ma_voice.favorites(player_id)
+    except (ma_voice.MAUnavailable, ma_voice.MAFailed) as e:
+        logger.warning("Could not read favourites from MA: %s", e)
+        return {}
+
+
+def _favorite_commands(state):
+    """SetValue commands for the page's hearts: 1 a favourite, 0 not, -1 hidden (can't be one)."""
+    return [{"type": "SetValue", "componentId": "AudioPlayerRoot", "property": f"{kind}Favorite",
+             "value": -1 if state[kind] is None else int(state[kind])}
+            for kind in ("song", "album") if kind in state]
+
+
+def _favorite_press(device_id, kind, on):
+    """A heart on the page: mark or unmark what plays, then show MA's answer on the page."""
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        return
+    logger.info("APL %s favourite button: %s", kind, "on" if on else "off")
+    try:
+        ma_voice.set_favorite(player_id, kind, on)
+    except (ma_voice.MAUnavailable, ma_voice.MAFailed) as e:
+        logger.warning("MA didn't change the favourite: %s", e)
+    # Also when it failed: the page flipped its heart already.
+    bell.send(device_id, ("favorites", _favorites_of(player_id)))
+
+
+def _modes_of(player_id):
+    """MA's shuffle and repeat for player_id's queue, or None if MA can't say."""
+    try:
+        return ma_voice.modes(player_id)
+    except (ma_voice.MAUnavailable, ma_voice.MAFailed) as e:
+        logger.warning("Could not read shuffle and repeat from MA: %s", e)
+        return None
+
+
+def _mode_commands(modes):
+    """SetValue commands for the shuffle and repeat buttons: -1 hidden; shuffle 0/1; repeat 0 off, 1 all, 2 one."""
+    return [{"type": "SetValue", "componentId": "AudioPlayerRoot", "property": "shuffleOn",
+             "value": -1 if modes is None else int(modes["shuffle"])},
+            {"type": "SetValue", "componentId": "AudioPlayerRoot", "property": "repeatMode",
+             "value": -1 if modes is None else ma_voice.REPEAT_MODES.index(modes["repeat"])}]
+
+
+# A new page waits at most this long for its button states; later, its first refresh brings them.
+START_BUTTONS_S = 1.0
+_start_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="start-buttons")
+
+
+def _start_buttons(device_id):
+    """The shuffle, repeat and heart states for a page the skill builds now, as the page's bind names.
+
+    MA is asked for both at once; what it hasn't answered within
+    START_BUTTONS_S is left out, and those buttons wait for the refresh.
+    """
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        return {}
+    asks = {_start_pool.submit(_modes_of, player_id): _mode_commands,
+            _start_pool.submit(_favorites_of, player_id): _favorite_commands}
+    done, late = futures.wait(asks, timeout=START_BUTTONS_S)
+    if late:
+        logger.info("MA was slow with the button states: the page shows them after its first refresh")
+    for future in late:
+        future.cancel()     # one still waiting for a worker (MA hangs) needn't run at all
+    states = {}
+    for future in done:
+        try:
+            states.update((command["property"], command["value"]) for command in asks[future](future.result()))
+        except Exception:
+            logger.exception("Could not read a button state from MA")
+    return states
+
+
+apl.set_start_buttons(_start_buttons)
+
+
+def _modes_handoff_commands(device_id, page_key):
+    """For the page, after shuffle or repeat changed: the buttons, and what now comes next."""
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        return []
+    commands = _mode_commands(_modes_of(player_id))
+    result = ma_control.get_current_track_time(player_id)
+    if result:
+        _, _, _, last, upcoming, _ = result
+        _track_changes.set_last(page_key, last)
+        upcoming = _with_ma_hostname(upcoming)
+        _images_on(page_key)["next"] = (upcoming or {}).get("image") or None
+        commands += track_time.upcoming_commands(_track_changes.queue_end_ms(page_key), upcoming)
+    return commands
+
+
+def _mode_press(device_id, kind, value):
+    """The shuffle or repeat button: set it in MA, then show MA's answer on the page."""
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        return
+    logger.info("APL %s button: %s", kind, value)
+    try:
+        if kind == "shuffle":
+            ma_voice.set_shuffle(player_id, bool(value))
+        else:
+            ma_voice.set_repeat_mode(player_id, ma_voice.REPEAT_MODES[value % len(ma_voice.REPEAT_MODES)])
+    except (ma_voice.MAUnavailable, ma_voice.MAFailed) as e:
+        logger.warning("MA didn't change %s: %s", kind, e)
+    # Also when it failed: the page flipped its button already.
+    bell.send(device_id, ("modes", None))
+
+
+def _play_album_for(device_id):
+    """A tap on the cover: play its whole album. False if MA won't (nothing to play)."""
+    player_id = device_mapping.get_player_for_device(device_id)
+    if not player_id:
+        return False
+    try:
+        name = ma_voice.play_playing_album(player_id)
+    except (ma_voice.MAUnavailable, ma_voice.MAFailed) as e:
+        logger.warning("MA didn't play the album: %s", e)
+        return False
+    logger.info("APL cover tap: playing album %s", name)
+    return name is not None
+
+
+def _ma_state_of(device_id, page_id):
+    """(MA state, MA elapsed ms, the page's track offset and end ms) for the bell's check, or None."""
+    player_id = device_mapping.get_player_for_device(device_id)
+    state = ma_control.get_queue_state(player_id) if player_id else None
+    if not state:
+        return None
+    return state[0], state[1], _track_changes.offset(page_id), _track_changes.track_end_ms(page_id)
+
+
+bell.set_handlers(press=_lan_press, ma_state=_ma_state_of, playing=_page_plays,
+                  pause_ma=lambda device_id: _sync_device_to_ma(device_id, "pause"),
+                  next_ma=lambda device_id: _next_or_previous_for(device_id, "next"),
+                  peers=lambda device_id: device_mapping.get_devices_for_player(
+                      device_mapping.get_player_for_device(device_id)))
+
+
+class APLUserEventHandler(AbstractRequestHandler):
+    """Handler for APL UserEvent requests from the player page.
+
+    - Pull: the page's doorbell (see bell.py) says there's news; the
+      answer has it, and the new state number for the page.
+    - MetadataRefresh: a page without a doorbell sends it every couple of
+      seconds. Both update title, artist and images, take MA's hand-offs,
+      and on a track change set the track time (see track_time).
+    - Next / Previous / Play / Pause / Seek: the page's own buttons and
+      seek bar (see _press).
+      They go to MA like "Alexa, next" does; the page's video must not skip
+      by itself, since it only has the one flow stream the page was opened with.
     """
     def can_handle(self, handler_input):
         # type: (HandlerInput) -> bool
         if not is_request_type("Alexa.Presentation.APL.UserEvent")(handler_input):
             return False
-
-        # Check if this is a metadata refresh event
-        request = handler_input.request_envelope.request
-        try:
-            arguments = getattr(request, 'arguments', [])
-            if arguments and len(arguments) > 0:
-                event_type = arguments[0]
-                return event_type == 'MetadataRefresh'
-        except Exception:
-            pass
-        return False
+        arguments = _apl_event_arguments(handler_input)
+        return bool(arguments) and arguments[0] in _APL_EVENTS
 
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
+        _page_heard_from(handler_input)
+        live_page.heard_from(_device_id_from(handler_input))
+        arguments = _apl_event_arguments(handler_input)
+        if arguments[0] in _PRESS_NUMBER_AT:
+            # The page's buttons. The same press may have come over the LAN
+            # already (bell.py): then the skill acted on it, and this answer is empty.
+            kind = arguments[0].lower()
+            index = _PRESS_NUMBER_AT[arguments[0]]
+            number = arguments[index] if len(arguments) > index else None
+            if not bell.pressed(_device_id_from(handler_input), number, kind):
+                return handler_input.response_builder.set_should_end_session(None).response
+            position_ms = (track_time.video_position_ms(arguments, index=1)
+                           if kind in ("pause", "play", "seek") else None)
+            if kind in _FAVORITE_PRESSES or kind in _MODE_PRESSES:
+                # ["FavSong", press number, 1 to mark or 0 to unmark]; Shuffle 1/0;
+                # Repeat 0 off, 1 all, 2 one
+                position_ms = int(float(arguments[2])) if len(arguments) > 2 else 0
+            done = _press(_device_id_from(handler_input), kind, position_ms)
+            # A press stops the page's running command sequence, and with it a
+            # refresh chain: restart it (a page with a doorbell has no chain).
+            if kind == "pause":
+                self._schedule_refresh(handler_input, [
+                    {"type": "ControlMedia", "componentId": "videoPlayer", "command": "pause"}])
+            elif not done:
+                # MA won't send a new stream: undo the page's pause and overlay
+                # (play: play the page's own stream).
+                self._schedule_refresh(handler_input, _UNDO_BUTTON_PRESS)
+            else:
+                self._schedule_refresh(handler_input)
+            return handler_input.response_builder.set_should_end_session(None).response
+        if arguments[0] == "QueueEnded":
+            # The page paused at the end of MA's last track. Stop MA, or it
+            # restarts the old flow when the Show asks for the stream again;
+            # MA's stop then closes the page.
+            logger.info("Queue ended on the page")
+            _sync_to_ma_unless_echo(handler_input, "stop")
+            return handler_input.response_builder.set_should_end_session(None).response
+
+        if arguments[0] == "Pull":
+            # ["Pull", seen state number, video position, playing, page id]
+            device_id = _device_id_from(handler_input)
+            try:
+                seen = int(float(arguments[1]))
+            except (IndexError, TypeError, ValueError):
+                seen = 0
+            page_id = str(arguments[4]) if len(arguments) > 4 else ""
+            answer = bell.pull(page_id, device_id, seen)
+            if answer is None:
+                return handler_input.response_builder.set_should_end_session(None).response
+            state, handoffs = answer
+            logger.info("Page on %s pulls state %s", (device_id or "")[-8:], state)
+            return self._update_page(handler_input, arguments, handoffs, [
+                {"type": "SetValue", "componentId": "AudioPlayerRoot",
+                 "property": "bellSeen", "value": state}], refresh=False)
+
+        handed = live_page.take(_device_id_from(handler_input))
+        return self._update_page(handler_input, arguments, [handed] if handed else [], [],
+                                 refresh=True)
+
+    def _update_page(self, handler_input, arguments, handoffs, commands, refresh):
+        """The answer to a Pull or MetadataRefresh: the latest metadata and track time, and the hand-offs.
+
+        refresh: ask for the next MetadataRefresh (a page without a doorbell).
+        """
+        # One ExecuteCommands directive for the whole answer: each new one
+        # cancels the commands still running from the one before (a loading
+        # PlayMedia, and the commands after it).
+        page_key = _page_key(handler_input, arguments)
+        commands, media = list(commands), []
+        for handed in handoffs:
+            more, more_media = self._take_handoff(handler_input, page_key, *handed)
+            commands += more
+            media += more_media
+            if handed[0] == "stream":
+                # the video starts the new stream at 0
+                arguments = [arguments[0], arguments[1] if len(arguments) > 1 else 0, 0]
 
         # Fetch latest metadata from Music Assistant
         changed = False
+        info = data.info
         try:
-            result = data.get_latest()
+            player_id = device_mapping.get_player_for_device(_device_id_from(handler_input))
+            result = data.get_latest(player_id=player_id)
             changed = bool(result and result.get('changed'))
+            info = (result or {}).get('info', data.info)
             if changed:
                 logger.info("Metadata changed")
             else:
@@ -618,27 +1624,76 @@ class APLUserEventHandler(AbstractRequestHandler):
             logger.exception("Failed to fetch latest metadata")
 
         # Check if we have valid metadata
-        if not data.info.get('audioSources'):
+        if not info.get('audioSources'):
             logger.warning("No audio sources available for metadata refresh")
         else:
             # Send updated APL document with new metadata
             if changed:
                 try:
-                    util.update_apl_metadata(handler_input.response_builder)
+                    util.update_apl_metadata(handler_input.response_builder, info, _images_on(page_key))
                     logger.info("APL metadata update directive added to response")
                 except Exception:
                     logger.exception("Failed to update APL metadata")
+            try:
+                commands += _track_time_commands(handler_input, arguments, page_key, info)
+            except Exception:
+                logger.exception("Failed to update APL track time")
 
-        # Always schedule the next refresh so polling continues.
-        try:
-            util.schedule_apl_refresh(handler_input.response_builder)
-        except Exception:
-            logger.exception("Failed to schedule APL refresh")
+        if not refresh:
+            util.execute_apl_commands(handler_input.response_builder, commands + media)
+            return handler_input.response_builder.set_should_end_session(None).response
+        # The media command runs next to the refresh timer: whether or not it
+        # completes before the stream plays, the refreshes go on.
+        refresh = util.apl_refresh_commands()
+        if media:
+            refresh = [{"type": "Parallel",
+                        "commands": media + [{"type": "Sequential", "commands": refresh}]}]
+        util.execute_apl_commands(handler_input.response_builder, commands + refresh)
 
-        # Explicitly keep session open to allow continued UserEvents
         # Unset, not False: False opens the mic on every refresh and ducks the music;
         # the APL page keeps the session alive by itself.
         return handler_input.response_builder.set_should_end_session(None).response
+
+    @staticmethod
+    def _take_handoff(handler_input, page_key, command, value):
+        """(APL commands, media commands) for what MA (or the skill) hands this open page."""
+        if command == "undo":
+            # The skill couldn't do what a press over the LAN asked (bell.py).
+            logger.info("Page undoes its button press")
+            return list(_UNDO_BUTTON_PRESS), []
+        if command == "favorites":
+            return _favorite_commands(value), []
+        if command == "modes":
+            return _modes_handoff_commands(_device_id_from(handler_input), page_key), []
+        logger.info("Open page takes %s from MA", command)
+        if command == "stream":
+            _track_changes.started(page_key)
+            # a new stream: the page won't switch to the next image by itself
+            _images_on(page_key)["next"] = None
+            return ([{"type": "SetValue", "componentId": "AudioPlayerRoot",
+                      "property": "videoProgressValue", "value": 0}] + _UNDO_BUTTON_PRESS[1:],
+                    [{"type": "PlayMedia", "componentId": "videoPlayer", "source": value,
+                      "audioTrack": "background"}])
+        if command == "pause":
+            return [], [{"type": "ControlMedia", "componentId": "videoPlayer", "command": "pause"}]
+        # resume: MA sends a new stream from the paused position, handed over the same way
+        if _resume_through_ma(handler_input) != "ok":
+            return [], [{"type": "ControlMedia", "componentId": "videoPlayer", "command": "play"}]
+        return [], []
+
+    @staticmethod
+    def _schedule_refresh(handler_input, commands=()):
+        # Without a doorbell, always schedule the next refresh so polling
+        # continues; other commands go in the same directive (a later one
+        # would cancel them). A page with a doorbell needs no refresh.
+        if bell.has_page(_device_id_from(handler_input)):
+            util.execute_apl_commands(handler_input.response_builder, list(commands))
+            return
+        try:
+            util.execute_apl_commands(handler_input.response_builder,
+                                      list(commands) + util.apl_refresh_commands())
+        except Exception:
+            logger.exception("Failed to schedule APL refresh")
 
 # ###################################################################
 
@@ -661,6 +1716,9 @@ class PlayCommandHandler(AbstractRequestHandler):
         # type: (HandlerInput) -> Response
         logger.info("In PlayCommandHandler")
         _ = handler_input.attributes_manager.request_attributes["_"]
+        # As "Alexa, resume": MA sends a new stream from the paused position.
+        if _resume_through_ma(handler_input) == "ok":
+            return handler_input.response_builder.response
         request = handler_input.request_envelope.request
         url, _audio = _get_stream_url(request)
         if not url:
@@ -674,7 +1732,8 @@ class PlayCommandHandler(AbstractRequestHandler):
             offset=0,
             text=None,
             response_builder=handler_input.response_builder,
-            supports_apl=supports_apl
+            supports_apl=_supports_apl(handler_input),
+            device_id=_device_id_from(handler_input)
         )
 
 
@@ -699,13 +1758,7 @@ class NextOrPreviousCommandHandler(AbstractRequestHandler):
         req_type = handler_input.request_envelope.request.object_type
         command = "next" if "Next" in req_type else "previous"
 
-        device_id = _device_id_from(handler_input)
-        player_id = device_mapping.get_player_for_device(device_id)
-        if player_id:
-            ma_control.send_player_command(player_id, command)
-        else:
-            logger.warning("No MA player mapped for device_id=%s (hardware command)", device_id)
-
+        _next_or_previous_to_ma(handler_input, command)
         return handler_input.response_builder.response
 
 
@@ -724,9 +1777,10 @@ class PauseCommandHandler(AbstractRequestHandler):
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
         logger.info("In PauseCommandHandler")
+        _sync_to_ma_unless_echo(handler_input, "pause")
         return util.stop(text=None,
                          response_builder=handler_input.response_builder,
-                         supports_apl=supports_apl)
+                         supports_apl=_supports_apl(handler_input))
 
 # ###################################################################
 
@@ -743,11 +1797,13 @@ class CatchAllExceptionHandler(AbstractExceptionHandler):
         # type: (HandlerInput, Exception) -> Response
         logger.info("In CatchAllExceptionHandler")
         logger.error(exception, exc_info=True)
-        _ = handler_input.attributes_manager.request_attributes["_"]
-        handler_input.response_builder.speak(_(data.UNHANDLED_MSG)).ask(
-            _(data.HELP_MSG).format(
-                util.audio_data(handler_input.request_envelope.request)))
-
+        # Page events and player requests run during playback, and Alexa
+        # rejects speech in AudioPlayer/PlaybackController responses: stay silent.
+        req_type = getattr(handler_input.request_envelope.request, 'object_type', '') or ''
+        if req_type.startswith(("Alexa.Presentation.APL.", "AudioPlayer.", "PlaybackController.")):
+            return handler_input.response_builder.response
+        _ = handler_input.attributes_manager.request_attributes.get("_", gettext.gettext)
+        handler_input.response_builder.speak(_(data.UNHANDLED_MSG)).set_should_end_session(True)
         return handler_input.response_builder.response
 
 # ###################################################################
@@ -755,16 +1811,20 @@ class CatchAllExceptionHandler(AbstractExceptionHandler):
 # ############# REQUEST / RESPONSE INTERCEPTORS #####################
 
 class APLSupportRequestInterceptor(AbstractRequestInterceptor):
-    """Request Interceptor to check if the device supports APL and update the global supports_apl variable."""
+    """Record per request whether the device supports APL.
+
+    A request attribute, not a module global: requests from different
+    Echos are handled concurrently.
+    """
     def process(self, handler_input):
-        global supports_apl
-        if hasattr(handler_input, 'request_envelope'):
+        try:
             supported_interfaces = getattr(
                 handler_input.request_envelope.context.system.device.supported_interfaces,
                 'alexa_presentation_apl', None)
-            supports_apl = supported_interfaces is not None
-        else:
-            supports_apl = False
+        except AttributeError:
+            supported_interfaces = None
+        handler_input.attributes_manager.request_attributes["supports_apl"] = (
+            supported_interfaces is not None)
 
 class RequestLogger(AbstractRequestInterceptor):
     """Log the alexa requests."""
@@ -857,6 +1917,13 @@ sb.add_request_handler(CancelOrStopIntentHandler())
 sb.add_request_handler(PauseCommandHandler())
 sb.add_request_handler(ResumeIntentHandler())
 sb.add_request_handler(StartOverIntentHandler())
+sb.add_request_handler(VoicePlayHandler())
+sb.add_request_handler(FavoriteHandler())
+sb.add_request_handler(PlayRandomHandler())
+sb.add_request_handler(WhatsPlayingHandler())
+sb.add_request_handler(MoveMusicHandler())
+sb.add_request_handler(SleepTimerHandler())
+sb.add_request_handler(CancelSleepTimerHandler())
 sb.add_request_handler(LoopOrShuffleIntentHandler())
 sb.add_request_handler(PlaybackStartedHandler())
 sb.add_request_handler(PlaybackFinishedHandler())
