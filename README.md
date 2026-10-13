@@ -1,6 +1,8 @@
 # Music Assistant Alexa Skill Prototype
 This project is an Alexa skill prototype for controlling the Music Assistant server. It provides a Flask-based web service, an Alexa skill handler, an API, and ASK CLI integration with Docker deployment support.
 
+On an Echo with a screen, the music stays on your network: only the requests go through Amazon, and Music Assistant needs no public address. See [How it works](ARCHITECTURE.md).
+
 ## How to Run
 
 #### Prerequisites
@@ -75,7 +77,7 @@ Notes:
 | Variable | Required | Default | Description |
 |---|:---:|:---:|---|
 | `SKILL_HOSTNAME` | Yes | — | Must be a publicly reachable HTTPS host (example: `alexa.example.com`). Should proxy to your open port on this container (port **5000** by default).  Public hostname used in the Alexa skill manifest and to validate the skill endpoint. |
-| `MA_HOSTNAME` | *No | — | ***REQUIRED** if your device does not have a display (does not support APL). Music Assistant server hostname (example: `ma.example.com`). Should proxy to your stream port on the Music Assistant server (port **8097** by default). Also required if you would like album art on your APL device. |
+| `MA_HOSTNAME` | *No | — | ***REQUIRED** if your device does not have a display (does not support APL). Music Assistant server hostname (example: `ma.example.com`). Should proxy to your stream port on the Music Assistant server (port **8097** by default). Also required if you would like album art on your APL device. For screen devices only, this host can be LAN-only (see [How it works](ARCHITECTURE.md)). |
 | `APP_USERNAME` | No | — | Username for the web UI and API basic authentication. In Docker Compose this is provided via a Docker secret (`/run/secrets/APP_USERNAME`) pointing to `./secrets/app_username.txt`, or as a plain env var when not using secrets. |
 | `APP_PASSWORD` | No | — | Password for the web UI and API basic authentication. Can be supplied as a Docker secret file or plain env var. |
 | `PORT` | No | `5000` | Port the app lives at. Ensure the `ports` mapping in [docker-compose.yml](docker-compose.yml) matches this value. |
@@ -87,6 +89,7 @@ Notes:
 | `ENABLE_APL` | No | `false` | Enable rich APL rendering (cover art, title, on-screen playback controls) on Echo Show and other APL-capable devices, instead of the plain AudioPlayer-only flow. Disabled by default for playback stability; set to `true` to opt back into screen rendering and live metadata refresh on supported devices. |
 | `MA_API_URL` | *No | — | ***REQUIRED** for voice-controlled Next/Previous. Base URL of the Music Assistant WebSocket API (e.g. `https://music.example.com`), used to send `next_track`/`previous_track` commands to the MA player paired with the requesting Echo (see [Device Mapping](#device-mapping) below). |
 | `MA_API_TOKEN` | *No | — | ***REQUIRED** alongside `MA_API_URL` if your MA server enforces auth (schema >= 28). A long-lived token created via MA's own auth flow (`auth/token/create`). Can be provided as a Docker secret the same way as `APP_PASSWORD`. |
+| `APL_BELL_URL` | No | — | The player page's doorbell, for fast and reliable screen updates over the LAN (example: `https://ma.example.com/bell/`). Your reverse proxy must send this path to the skill. Without it, the page asks for updates through Amazon. See [The doorbell](ARCHITECTURE.md#the-doorbell). |
 
 | `LWA_CLIENT_ID`, `LWA_CLIENT_SECRET`, `LWA_REFRESH_TOKEN` | No | — | Lets the skill upload the voice-command model (your library's names) to Amazon by itself, once a day when the library changed. See [Voice commands](#voice-commands). Can be Docker secrets like `APP_PASSWORD`. |
 
