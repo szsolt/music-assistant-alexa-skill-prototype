@@ -1910,6 +1910,7 @@ class ResponseLogger(AbstractResponseInterceptor):
         # type: (HandlerInput, Response) -> None
         request = handler_input.request_envelope.request
         _recent_replies.append((request.request_id, response))
+        logger.debug("Alexa Response: %s", response)
         if response is None:
             logger.info("Reply to %s: none", request.object_type)
             return
