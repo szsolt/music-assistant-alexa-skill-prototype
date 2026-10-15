@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import collections
+import json
 import logging
 import threading
 import time
@@ -11,6 +13,7 @@ from ask_sdk.standard import StandardSkillBuilder
 from ask_sdk_core.dispatch_components import (
     AbstractRequestHandler, AbstractExceptionHandler,
     AbstractRequestInterceptor, AbstractResponseInterceptor)
+from ask_sdk_core.serialize import DefaultSerializer
 from ask_sdk_core.utils import is_request_type, is_intent_name
 from ask_sdk_core.handler_input import HandlerInput
 from ask_sdk_model import Response
@@ -23,6 +26,10 @@ sb = StandardSkillBuilder()
 #     table_name=data.jingle["db_table"], auto_create_table=True)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+# The last replies sent, so a reply Alexa rejects (System.ExceptionEncountered) can be logged
+_recent_replies = collections.deque(maxlen=50)
+_serializer = DefaultSerializer()
 
 
 class _ComponentFilter(logging.Filter):
@@ -1127,8 +1134,14 @@ class ExceptionEncounteredHandler(AbstractRequestHandler):
 
     def handle(self, handler_input):
         # type: (HandlerInput) -> Response
-        logger.info("\n**************** EXCEPTION *******************")
-        logger.info(handler_input.request_envelope)
+        request = handler_input.request_envelope.request
+        cause_id = getattr(request.cause, "request_id", None)
+        reply = next((r for rid, r in list(_recent_replies) if rid == cause_id), None)
+        logger.warning(
+            "Alexa rejected the reply to %s: %s %s. Reply: %s",
+            cause_id, getattr(request.error, "object_type", None),
+            getattr(request.error, "message", None),
+            json.dumps(_serializer.serialize(reply), default=str) if reply else "not recorded")
         return handler_input.response_builder.response
 
 # ###################################################################
@@ -1895,7 +1908,15 @@ class ResponseLogger(AbstractResponseInterceptor):
     """Log the alexa responses."""
     def process(self, handler_input, response):
         # type: (HandlerInput, Response) -> None
-        logger.debug("Alexa Response: {}".format(response))
+        request = handler_input.request_envelope.request
+        _recent_replies.append((request.request_id, response))
+        if response is None:
+            logger.info("Reply to %s: none", request.object_type)
+            return
+        logger.info(
+            "Reply to %s: directives=%s speech=%s end_session=%s",
+            request.object_type, [d.object_type for d in response.directives or []],
+            response.output_speech is not None, response.should_end_session)
 
 # ###################################################################
 
