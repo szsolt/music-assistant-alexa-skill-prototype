@@ -29,6 +29,7 @@ RETRY_S = (5, 120)
 _lock = threading.Lock()
 _pending = {}     # queue_id -> its Timer
 _started = False
+_client = None    # the connected client: it keeps MA's players and queues up to date
 
 
 def queue_changed(queue_id, players=()):
@@ -67,14 +68,31 @@ def _players_of(client, queue_id):
             if queue_id in (player.synced_to, player.active_group, player.active_source)]
 
 
+def active_queue(player_id):
+    """MA's active queue on player_id, as MA picks it, from the listener's copy. None while not connected."""
+    client = _client
+    player = client and client.players.get(player_id)
+    if not player:
+        return None
+    for leader in (player.synced_to, player.active_group):
+        if leader and leader != player_id:
+            return active_queue(leader)
+    return client.player_queues.get(player.active_source or player_id)
+
+
 async def _listen(server_url, token):
+    global _client
     # Without a connect timeout, a host that drops packets holds the listener for minutes.
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(sock_connect=10)) as session:
         async with MusicAssistantClient(server_url, session, token=token) as client:
             client.subscribe(lambda event: queue_changed(event.object_id, _players_of(client, event.object_id)),
                              EventType.QUEUE_ITEMS_UPDATED)
             logger.info("Listening to MA's queue changes")
-            await client.start_listening()
+            _client = client
+            try:
+                await client.start_listening()
+            finally:
+                _client = None
 
 
 def _loop():

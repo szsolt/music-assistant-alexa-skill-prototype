@@ -64,3 +64,14 @@ def test_players_of_a_queue():
                NS(player_id="i", synced_to=None, active_group="leader", active_source=None)]
     client = NS(players=NS(players=players))
     assert ma_events._players_of(client, "leader") == ["g", "i"]
+
+
+def test_active_queue_comes_from_the_live_client(monkeypatch):
+    players = {"p": NS(synced_to=None, active_group=None, active_source=None),
+               "g": NS(synced_to="p", active_group=None, active_source=None)}
+    queues = {"p": "queue of p"}
+    client = NS(players=NS(get=players.get), player_queues=NS(get=queues.get))
+    assert ma_events.active_queue("p") is None
+    monkeypatch.setattr(ma_events, "_client", client)
+    assert ma_events.active_queue("p") == "queue of p"
+    assert ma_events.active_queue("g") == "queue of p"

@@ -31,10 +31,10 @@ from music_assistant_models.enums import ContentType, PlaybackState
 from music_assistant_models.errors import MusicAssistantError
 
 from env_secrets import get_env_secret
-from . import track_time
+from . import ma_events, track_time
 
 logger = logging.getLogger(__name__)
-# The client logs every connect; the player page's check connects every few seconds.
+# The client logs every connect.
 logging.getLogger("music_assistant_client").setLevel(logging.WARNING)
 
 SUPPORTED_COMMANDS = ("next", "previous", "start_over", "pause", "stop", "resume")
@@ -230,30 +230,17 @@ def get_current_track_time(player_id):
     return None
 
 
-async def _get_queue_state(server_url, token, player_id):
-    async with aiohttp.ClientSession() as session:
-        async with MusicAssistantClient(server_url, session, token=token) as client:
-            queue = await client.player_queues.get_active_queue(player_id)
-            if queue is None or queue.current_item is None:
-                return None
-            return queue.state.value, int(queue.corrected_elapsed_time * 1000)
-
-
 def get_queue_state(player_id):
     """(state, elapsed_ms) of MA's queue on player_id, or None.
 
     state is MA's playback state: "playing", "paused" or "idle". For the
-    player page's check every few seconds (bell.py).
+    player page's check every few seconds (bell.py): read from the event
+    listener's copy, so it needs no connection of its own.
     """
-    server_url = get_env_secret("MA_API_URL")
-    token = get_env_secret("MA_API_TOKEN")
-    if not server_url:
+    queue = ma_events.active_queue(player_id)
+    if queue is None or queue.current_item is None:
         return None
-    try:
-        return asyncio.run(_get_queue_state(server_url, token, player_id))
-    except Exception as e:
-        logger.debug("Could not read the queue state of MA player %s: %s", player_id, e)
-    return None
+    return queue.state.value, int(queue.corrected_elapsed_time * 1000)
 
 
 def is_paused(player_id):
