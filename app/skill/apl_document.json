@@ -419,7 +419,7 @@
               ]
             },
             {
-              "description": "Up next fades in for the song's last 20 s. A tick, not a bound opacity: only commands animate. AnimateItem on its own sequencer: tick handlers run in fast mode, which skips it.",
+              "description": "Up next brightens for the song's last 20 s.",
               "minimumDelay": 250,
               "when": "${!upNextBright && trackDuration > 0 && trackDuration - (videoProgressValue - trackOffset) <= 20000}",
               "commands": [
@@ -429,17 +429,10 @@
                   "value": true
                 },
                 {
-                  "type": "AnimateItem",
+                  "type": "SetValue",
                   "componentId": "Audio_UpNext",
-                  "sequencer": "upNextFade",
-                  "duration": 1500,
-                  "value": [
-                    {
-                      "property": "opacity",
-                      "from": 0.4,
-                      "to": 1
-                    }
-                  ]
+                  "property": "opacity",
+                  "value": 1
                 }
               ]
             },
@@ -595,16 +588,10 @@
                               "value": "normal"
                             },
                             {
-                              "type": "AnimateItem",
+                              "type": "SetValue",
                               "componentId": "Busy_Overlay",
-                              "duration": 200,
-                              "value": [
-                                {
-                                  "property": "opacity",
-                                  "from": 0,
-                                  "to": 1
-                                }
-                              ]
+                              "property": "opacity",
+                              "value": 1
                             }
                           ],
                           "item": {
@@ -1013,16 +1000,10 @@
                                     "value": "normal"
                                   },
                                   {
-                                    "type": "AnimateItem",
+                                    "type": "SetValue",
                                     "componentId": "Busy_Overlay",
-                                    "duration": 200,
-                                    "value": [
-                                      {
-                                        "property": "opacity",
-                                        "from": 0,
-                                        "to": 1
-                                      }
-                                    ]
+                                    "property": "opacity",
+                                    "value": 1
                                   }
                                 ],
                                 "metadataDisplayed": true,
@@ -1179,16 +1160,10 @@
                                         "value": "normal"
                                       },
                                       {
-                                        "type": "AnimateItem",
+                                        "type": "SetValue",
                                         "componentId": "Busy_Overlay",
-                                        "duration": 200,
-                                        "value": [
-                                          {
-                                            "property": "opacity",
-                                            "from": 0,
-                                            "to": 1
-                                          }
-                                        ]
+                                        "property": "opacity",
+                                        "value": 1
                                       }
                                     ],
                                     "item": {
@@ -1239,16 +1214,10 @@
                                             "value": "normal"
                                           },
                                           {
-                                            "type": "AnimateItem",
+                                            "type": "SetValue",
                                             "componentId": "Busy_Overlay",
-                                            "duration": 200,
-                                            "value": [
-                                              {
-                                                "property": "opacity",
-                                                "from": 0,
-                                                "to": 1
-                                              }
-                                            ]
+                                            "property": "opacity",
+                                            "value": 1
                                           }
                                         ]
                                       },
@@ -1331,16 +1300,10 @@
                                         "value": "normal"
                                       },
                                       {
-                                        "type": "AnimateItem",
+                                        "type": "SetValue",
                                         "componentId": "Busy_Overlay",
-                                        "duration": 200,
-                                        "value": [
-                                          {
-                                            "property": "opacity",
-                                            "from": 0,
-                                            "to": 1
-                                          }
-                                        ]
+                                        "property": "opacity",
+                                        "value": 1
                                       }
                                     ],
                                     "item": {
