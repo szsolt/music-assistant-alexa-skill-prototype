@@ -313,6 +313,11 @@
               "value": -1
             },
             {
+              "name": "nextItem",
+              "type": "string",
+              "value": ""
+            },
+            {
               "name": "refreshTick",
               "type": "number",
               "value": 0

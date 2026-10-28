@@ -303,10 +303,11 @@ class HtmlPageRenewHandler(AbstractRequestHandler):
         apl.add_apl(handler_input.response_builder, start_paused=True, device_id=device_id)
         live_page.closed(device_id)
         live_page.heard_from(device_id)
-        if _resume_through_ma(handler_input) != "ok":
+        # The page names the next track when it asks just before it: then the new page starts there.
+        if _resume_for(device_id, item_id=message.get("item")) != "ok":
             handler_input.response_builder.response.directives = None
             return handler_input.response_builder.response
-        logger.info("Page %s renewed", message["renew"])
+        logger.info("Page %s renewed%s", message["renew"], " at the next track" if message.get("item") else "")
         _watch_page(device_id)
         return handler_input.response_builder.response
 
@@ -1245,8 +1246,8 @@ def _resume_through_ma(handler_input, position_ms=None):
     return _resume_for(_device_id_from(handler_input), position_ms)
 
 
-def _resume_for(device_id, position_ms=None):
-    """Resume MA at position_ms, else where the page or MA paused.
+def _resume_for(device_id, position_ms=None, item_id=None):
+    """Resume MA at position_ms, else where the page or MA paused; or play queue item item_id from its start.
 
     Returns "ok", "unmapped" or "failed". MA pushes a new stream from that
     position and relaunches the skill, as for next/previous.
@@ -1257,7 +1258,7 @@ def _resume_for(device_id, position_ms=None):
         return "unmapped"
     if position_ms is None:
         position_ms = _recall(_paused_at, device_id)
-    start = ma_control.resume_at(player_id, position_ms)
+    start = ma_control.resume_at(player_id, position_ms, item_id)
     if start is None:
         return "failed"
     _paused_at.pop(device_id, None)

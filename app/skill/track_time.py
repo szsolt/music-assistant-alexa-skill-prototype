@@ -262,14 +262,15 @@ def upcoming_commands(queue_end_ms, upcoming):
                         ("nextDuration", int(upcoming.get("duration_ms") or 0) if upcoming else -1),
                         ("nextTitleSize", title_size(upcoming.get("title"))),
                         ("nextAlbum", upcoming.get("album", "")),
-                        ("nextQuality", upcoming.get("quality", ""))):
+                        ("nextQuality", upcoming.get("quality", "")),
+                        ("nextItem", upcoming.get("item_id", ""))):
         commands.append({"type": "SetValue", "componentId": "AudioPlayerRoot",
                          "property": prop, "value": value})
     return commands
 
 
-# Pages opened before the third title size, the album line or the quality lack these.
-_NEW_PAGE_ONLY = ("nextTitleSize", "nextAlbum", "quality", "nextQuality")
+# Pages opened before the third title size, the album line, the quality or the next item lack these.
+_NEW_PAGE_ONLY = ("nextTitleSize", "nextAlbum", "quality", "nextQuality", "nextItem")
 
 
 def new_page_only_last(commands):

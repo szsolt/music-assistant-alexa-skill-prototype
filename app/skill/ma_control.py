@@ -196,7 +196,8 @@ def _upcoming(client, item):
     except Exception:
         image = ""
     duration = getattr(media, "duration", None) or item.duration
-    return {"title": title,
+    return {"item_id": item.queue_item_id,
+            "title": title,
             "secondary": artist,
             "album": album,
             "image": image,
@@ -249,12 +250,15 @@ def is_paused(player_id):
     return bool(result and result[2])
 
 
-async def _resume_at(server_url, token, player_id, position_ms):
+async def _resume_at(server_url, token, player_id, position_ms, item_id=None):
     async with aiohttp.ClientSession() as session:
         async with MusicAssistantClient(server_url, session, token=token) as client:
             queue = await client.player_queues.get_active_queue(player_id)
             if queue is None or queue.current_item is None:
                 raise ValueError(f"No active queue/current track for player {player_id}")
+            if item_id:
+                await client.player_queues.play_index(queue.queue_id, item_id)
+                return 0
             # corrected: where a playing queue is now, not at its last update
             position = track_time.resume_position_s(position_ms, queue.corrected_elapsed_time,
                                                     queue.current_item.duration)
@@ -262,8 +266,8 @@ async def _resume_at(server_url, token, player_id, position_ms):
             return position * 1000
 
 
-def resume_at(player_id, position_ms=None):
-    """Resume MA's current track at position_ms (default: where MA is).
+def resume_at(player_id, position_ms=None, item_id=None):
+    """Resume MA's current track at position_ms (default: where MA is), or queue item item_id at its start.
 
     Returns the position used, in ms, or None on failure.
 
@@ -278,7 +282,7 @@ def resume_at(player_id, position_ms=None):
         logger.error("MA_API_URL is not set; cannot resume MA player %s", player_id)
         return None
     try:
-        return asyncio.run(_resume_at(server_url, token, player_id, position_ms))
+        return asyncio.run(_resume_at(server_url, token, player_id, position_ms, item_id))
     except (CannotConnect, ConnectionFailed, InvalidServerVersion) as e:
         logger.error("Could not connect to Music Assistant at %s: %s", server_url, e)
     except MusicAssistantError as e:

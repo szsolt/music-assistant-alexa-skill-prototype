@@ -30,6 +30,7 @@ def fresh(monkeypatch):
     html_page._started.clear()
     html_page._queues.clear()
     html_page._presses.clear()
+    html_page._waiting.clear()
     monkeypatch.setattr(time, "monotonic", lambda: 0.0)
     monkeypatch.setattr(bell, "_handlers", {})
     monkeypatch.setattr(bell, "_run", lambda fn, *args: fn(*args))
@@ -101,6 +102,18 @@ def test_reply_commands_go_to_the_html_page():
     assert json.loads(next(stream)[len("data: "):]) == {"media": "pause", "set": {"seen": 2}}
     stream.close()
     assert page not in html_page._queues
+
+
+def test_reply_commands_wait_for_the_page_to_connect():
+    page = _html_page()
+    response = ResponseFactory().add_directive(ExecuteCommandsDirective(commands=[
+        {"type": "PlayMedia", "componentId": "videoPlayer", "source": "https://ma.example/flow2.mp3"}],
+        token="playbackToken")).response
+    html_page.take_commands("d", response)
+    stream = html_page.stream(page)
+    next(stream)
+    assert json.loads(next(stream)[len("data: "):]) == {"src": "https://ma.example/flow2.mp3", "media": "play"}
+    stream.close()
 
 
 def test_reply_commands_stay_for_an_apl_page(monkeypatch):

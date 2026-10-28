@@ -115,9 +115,15 @@ page over SSE.
 - Amazon closes the page after 1800 s without a touch or voice.
 - A sendMessage ping with a HandleMessage reply does not reset it.
 - A text command (MA's fake voice) ends the session first, so it closes the page.
-- What works: the page asks the skill for a new page after 25 min. The skill
-  answers with a new Start and MA's stream at the same spot, in the same
-  session. The swap takes about 2 s. Tested for 1.5 h on an Echo Show.
+- What works: the page asks the skill for a new page. The skill answers with
+  a new Start in the same session. The swap takes about 1 s.
+- The page asks 1.5 s before the last track change that comes before 28 min,
+  naming the next track. The skill starts MA on that track, so the swap falls
+  between songs.
+- With no track change in time, the page asks at 28 min. MA's stream resumes
+  at the same spot.
+- Messages for a new page wait until it connects. The page reports at once,
+  so the new stream could arrive before it listens.
 - A paused page doesn't ask, so it closes after 30 min.
 
 ## Non-goals

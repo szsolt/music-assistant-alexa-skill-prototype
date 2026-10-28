@@ -311,14 +311,22 @@ def renew(html_launch, monkeypatch):
     monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "Office")
     monkeypatch.setattr(lf.ma_control, "is_paused", lambda player_id: False)
     order = html_launch[1]
-    monkeypatch.setattr(lf, "_resume_through_ma", lambda handler_input: order.append(("resume", lp.is_live("d"))) or "ok")
+    monkeypatch.setattr(lf, "_resume_for", lambda device_id, position_ms=None, item_id=None:
+                        order.append(("resume", lp.is_live("d"), item_id)) or "ok")
     return order
 
 
 def test_a_playing_page_is_replaced_by_a_new_one_when_it_asks(renew):
     response = lf.HtmlPageRenewHandler().handle(_renew("p0"))
-    assert renew == [("page", True), ("resume", True)]
+    assert renew == [("page", True), ("resume", True, None)]
     assert len(response.directives) == 1 and response.should_end_session is None
+
+
+def test_a_page_replaced_at_a_track_end_starts_the_next_track(renew):
+    request = _renew("p0")
+    request.request_envelope.request.message["item"] = "q2"
+    lf.HtmlPageRenewHandler().handle(request)
+    assert renew == [("page", True), ("resume", True, "q2")]
 
 
 def test_a_paused_page_is_not_replaced(renew, monkeypatch):

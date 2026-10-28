@@ -37,6 +37,7 @@ _local = threading.local()
 _lock = threading.Lock()
 _started = {}   # page id -> its start state
 _queues = {}    # page id -> [queue of messages], one per open SSE stream
+_waiting = {}   # page id -> messages sent before its SSE stream opened
 _presses = {}   # page id -> its last press number (bell.pressed)
 _serializer = DefaultSerializer()
 
@@ -46,7 +47,7 @@ _FIELDS = {
     "album": "album", "quality": "quality", "trackOffset": "trackOffset", "trackDuration": "trackDuration",
     "queueEnd": "queueEnd", "nextTitle": "nextTitle", "nextTitleSize": "nextTitleSize",
     "nextSecondary": "nextArtist", "nextAlbum": "nextAlbum", "nextQuality": "nextQuality",
-    "nextImage": "nextImage", "nextDuration": "nextDuration", "songFavorite": "songFavorite",
+    "nextImage": "nextImage", "nextDuration": "nextDuration", "nextItem": "nextItem", "songFavorite": "songFavorite",
     "albumFavorite": "albumFavorite", "shuffleOn": "shuffle", "repeatMode": "repeat", "bellSeen": "seen",
 }
 _TEXTS = {"Audio_PrimaryText": "title", "Audio_PrimaryTextLong": "title", "Audio_PrimaryTextLonger": "title",
@@ -92,6 +93,7 @@ def started(page_id, template_item, autoplay):
         if len(_started) > 100:
             _started.clear()
             _presses.clear()
+            _waiting.clear()
         _started[page_id] = start
 
 
@@ -144,6 +146,8 @@ def take_commands(device_id, response):
         if not commands or page_id not in _started:
             return
         update = message(_serializer.serialize([c for d in commands for c in d.commands or []]))
+        if update and page_id not in _queues:
+            _waiting.setdefault(page_id, []).append(update)
         for q in _queues.get(page_id, []) if update else []:
             q.put(update)
     response.directives = [d for d in directives if d not in commands] or None
@@ -168,6 +172,8 @@ def stream(page_id):
     q = queue.Queue()
     with _lock:
         _queues.setdefault(page_id, []).append(q)
+        for update in _waiting.pop(page_id, []):
+            q.put(update)
     try:
         yield "retry: 1000\n\n"
         quiet_since = time.monotonic()

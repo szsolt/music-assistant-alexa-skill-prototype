@@ -83,7 +83,24 @@ html, body { margin: 0; height: 100%; overflow: hidden; position: relative; back
 // What the page shows first; the skill fills it in (html_page.start_state).
 const START = /*START*/null;
 const BASE = location.pathname + '/';
-const RENEW_MS = 25 * 60 * 1000;
+// Amazon closes the page after 30 min without a touch or voice: the skill
+// sends a new one when asked. The page asks just before the last track change
+// that comes in time, naming the next track, so the swap falls between tracks.
+const RENEW_BY_MS = 28 * 60 * 1000, RENEW_LEAD_MS = 1500;
+const loadedAt = Date.now();
+let alexaClient = null, renewAskedAt = 0;
+function renew(item) {
+  if (!alexaClient || Date.now() - renewAskedAt < 60000) return;
+  renewAskedAt = Date.now();
+  alexaClient.skill.sendMessage(Object.assign({ renew: location.pathname.split('/').pop() }, item ? { item } : {}));
+}
+function renewWhenDue() {
+  const left = loadedAt + RENEW_BY_MS - Date.now();
+  if (left <= 0) return renew();
+  const toEnd = state.trackOffset + state.trackDuration - position();
+  if (!audio.paused && state.trackDuration > 0 && state.nextItem && toEnd > 0 && toEnd <= RENEW_LEAD_MS
+      && toEnd + state.nextDuration >= left) renew(state.nextItem);
+}
 const $ = id => document.getElementById(id);
 const audio = $('audio');
 const ICONS = {
@@ -97,7 +114,7 @@ ICONS.repeatOne = ICONS.repeat + 'm-4-2V9h-1l-2 1v1h1.5v4H13z';
 const state = Object.assign({
   title: '', artist: '', album: '', titleSize: 0, cover: '', background: '', quality: '',
   trackOffset: 0, trackDuration: 0, queueEnd: 0, seen: 0,
-  nextTitle: '', nextTitleSize: 0, nextArtist: '', nextAlbum: '', nextQuality: '', nextImage: '', nextDuration: -1,
+  nextTitle: '', nextTitleSize: 0, nextArtist: '', nextAlbum: '', nextQuality: '', nextImage: '', nextDuration: -1, nextItem: '',
   songFavorite: -1, albumFavorite: -1, shuffle: -1, repeat: -1,
 }, START);
 let seeking = false, queueEnded = false;
@@ -156,7 +173,7 @@ audio.addEventListener('timeupdate', () => {
     Object.assign(state, {
       trackOffset: state.trackOffset + state.trackDuration, trackDuration: state.nextDuration,
       title: state.nextTitle, titleSize: state.nextTitleSize, artist: state.nextArtist,
-      album: state.nextAlbum, quality: state.nextQuality, nextDuration: -1,
+      album: state.nextAlbum, quality: state.nextQuality, nextDuration: -1, nextItem: '',
     });
     if (state.nextImage) state.cover = state.background = state.nextImage;
   }
@@ -172,6 +189,7 @@ audio.addEventListener('pause', () => {
   render();
 });
 setInterval(() => {
+  renewWhenDue();
   const near = state.trackDuration > 0 && state.trackOffset + state.trackDuration - position() <= 20000;
   $('upnext').style.opacity = near ? 1 : .8;
   const d = new Date(); $('clock').textContent = d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
@@ -195,9 +213,7 @@ $('slider').oninput = () => { seeking = true; $('elapsed').textContent = time($(
 $('slider').onchange = () => { seeking = false; waitFor({ action: 'seek', position: Number($('slider').value) }); };
 
 try {
-  // Amazon closes the page after 30 min without a touch or voice: ask the skill for a new one first.
-  Alexa.create({ version: '1.1' }).then(({ alexa }) => setTimeout(() =>
-    alexa.skill.sendMessage({ renew: location.pathname.split('/').pop() }), RENEW_MS))
+  Alexa.create({ version: '1.1' }).then(({ alexa }) => { alexaClient = alexa; })
     .catch(e => console.log('alexa: ' + e));
 } catch (e) { console.log('no alexa sdk: ' + e); }
 audio.src = state.stream;
