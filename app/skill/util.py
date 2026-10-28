@@ -6,7 +6,7 @@ import re
 import logging
 import threading
 import requests
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from env_secrets import get_env_secret
 from typing import Dict, Optional
 from ask_sdk_model import Request, Response
@@ -301,6 +301,12 @@ def clear(response_builder):
     return response_builder.response
 
 
+def _image_key(url):
+    """An MA image's id, the same from MA's web and stream servers; other images by URL."""
+    path = urlsplit(url or "").path
+    return path if "/imageproxy/" in path else url
+
+
 def update_apl_metadata(response_builder, info=None, shown=None):
     """Update the APL document with the latest metadata without interrupting playback.
 
@@ -330,11 +336,11 @@ def update_apl_metadata(response_builder, info=None, shown=None):
             cover_image = replace_ip_in_url(cover_image, hostname)
             background_image = replace_ip_in_url(background_image, hostname)
         if shown is not None:
-            on_page = {shown.get("cover"), shown.get("next")}
+            on_page = {_image_key(shown.get("cover")), _image_key(shown.get("next"))}
             new_cover, new_background = cover_image, background_image
-            if cover_image in on_page:
+            if _image_key(cover_image) in on_page:
                 cover_image = ""
-            if background_image in on_page | {shown.get("background")}:
+            if _image_key(background_image) in on_page | {_image_key(shown.get("background"))}:
                 background_image = ""
             shown.update(cover=new_cover or shown.get("cover"),
                          background=new_background or shown.get("background"), next=None)

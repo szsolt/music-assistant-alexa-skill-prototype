@@ -41,6 +41,14 @@ def test_the_image_the_page_switched_to_itself_is_not_set_again(monkeypatch):
     assert ("Audio_CoverArt", "imageSource") in _set(_info("c.jpg"), shown, monkeypatch)
 
 
+def test_an_ma_image_on_the_page_matches_its_stream_server_url(monkeypatch):
+    shown = {"cover": "a.jpg", "background": "a.jpg",
+             "next": "https://ma.example.com/imageproxy/b1?size=512"}
+    commands = _set(_info("https://stream.example.com/imageproxy/b1?size=512&fmt=jpg"), shown, monkeypatch)
+    assert ("Audio_CoverArt", "imageSource") not in commands
+    assert ("AlexaBackground", "backgroundImageSource") not in commands
+
+
 def test_long_titles_have_smaller_twins_that_follow_track_changes():
     import json, pathlib
     document = json.loads((pathlib.Path(apl.__file__).parent / "apl_document.json").read_text())
