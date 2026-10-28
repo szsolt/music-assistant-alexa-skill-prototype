@@ -258,3 +258,75 @@ def test_watchdog_waits_longer_for_a_page_with_a_bell_and_stops_when_it_plays(mo
     lf._page_plays("with-bell")
     assert timers[1].cancelled and "with-bell" not in lf._page_watch
     lf._page_plays("no-bell")
+
+
+@pytest.fixture
+def html_launch(monkeypatch):
+    """Echo d opens the skill and gets the HTML page. Yields what happened, in order."""
+    monkeypatch.setenv("ENABLE_APL", "true")
+    monkeypatch.setattr(lf.device_mapping, "is_another_echos_stream", lambda *a: False)
+    monkeypatch.setattr(lf, "_watch_page", lambda device_id: None)
+    order = []
+
+    def add_apl(builder, start_paused, device_id):
+        order.append(("page", start_paused))
+        builder.add_directive(lf.html_page.start_directive("p1"))
+    monkeypatch.setattr(lf.apl, "add_apl", add_apl)
+    lp._last_event.clear()
+    lf.html_page.want(True)
+    launch = _input(None)
+    launch.request_envelope.request.object_type = "LaunchRequest"
+    yield launch, order
+    lf.html_page.want(False)
+    lp.closed("d")
+
+
+def test_open_sends_the_html_page_before_ma_resumes(html_launch, monkeypatch):
+    launch, order = html_launch
+    monkeypatch.setattr(lf, "_resume_through_ma", lambda handler_input: order.append(("resume", lp.is_live("d"))) or "ok")
+    response = lf.LaunchRequestOrPlayAudioHandler().handle(launch)
+    assert order == [("page", True), ("resume", True)]
+    assert len(response.directives) == 1 and response.should_end_session is None
+
+
+def test_open_without_ma_resume_drops_the_html_page(html_launch, monkeypatch):
+    launch, order = html_launch
+    monkeypatch.setattr(lf, "_resume_through_ma", lambda handler_input: "failed")
+    monkeypatch.setattr(lf.device_mapping, "is_other_players_stream", lambda *a: True)
+    response = lf.LaunchRequestOrPlayAudioHandler().handle(launch)
+    assert not response.directives and "nothing to play" in response.output_speech.ssml
+    assert not lp.is_live("d")
+
+
+def _renew(page_id):
+    renew = _input(None)
+    renew.request_envelope.request = NS(object_type="Alexa.Presentation.HTML.Message", message={"renew": page_id})
+    return renew
+
+
+@pytest.fixture
+def renew(html_launch, monkeypatch):
+    """Echo d shows page p0 while MA plays on Office."""
+    monkeypatch.setattr(lf.bell, "page_of", lambda device_id: "p0")
+    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "Office")
+    monkeypatch.setattr(lf.ma_control, "is_paused", lambda player_id: False)
+    order = html_launch[1]
+    monkeypatch.setattr(lf, "_resume_through_ma", lambda handler_input: order.append(("resume", lp.is_live("d"))) or "ok")
+    return order
+
+
+def test_a_playing_page_is_replaced_by_a_new_one_when_it_asks(renew):
+    response = lf.HtmlPageRenewHandler().handle(_renew("p0"))
+    assert renew == [("page", True), ("resume", True)]
+    assert len(response.directives) == 1 and response.should_end_session is None
+
+
+def test_a_paused_page_is_not_replaced(renew, monkeypatch):
+    monkeypatch.setattr(lf.ma_control, "is_paused", lambda player_id: True)
+    response = lf.HtmlPageRenewHandler().handle(_renew("p0"))
+    assert renew == [] and not response.directives
+
+
+def test_an_old_page_is_not_replaced(renew):
+    response = lf.HtmlPageRenewHandler().handle(_renew("p-old"))
+    assert renew == [] and not response.directives

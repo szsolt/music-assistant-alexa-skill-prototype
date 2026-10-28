@@ -160,9 +160,12 @@ def logo_url():
     return base_url() + "logo.png" if base_url() else ""
 
 
-def new_page(device_id):
-    """The id for a page about to be sent to device_id, or '' for a page without a bell."""
-    if not base_url() or not device_id:
+def new_page(device_id, always=False):
+    """The id for a page about to be sent to device_id, or '' for a page without a bell.
+
+    always: a page that rings without APL_BELL_URL (the HTML page uses its own server's).
+    """
+    if not (base_url() or always) or not device_id:
         return ""
     page_id = secrets.token_hex(8)
     with _lock:
@@ -176,6 +179,26 @@ def has_page(device_id):
     """True if device_id's latest page has a bell (it needs no polling)."""
     with _lock:
         return device_id in _page_of
+
+
+def device_of(page_id):
+    """The Echo of a page the skill holds, or None."""
+    with _lock:
+        page = _pages.get(page_id)
+        return page.device_id if page else None
+
+
+def page_of(device_id):
+    """The id of device_id's latest page, or None."""
+    with _lock:
+        return _page_of.get(device_id)
+
+
+def state_of(page_id):
+    """The skill's latest state number for page_id, or None if it doesn't hold the page."""
+    with _lock:
+        page = _pages.get(page_id)
+        return page.state if page else None
 
 
 def rang(page_id, seen, press=None, at=None, playing=None, now=None):

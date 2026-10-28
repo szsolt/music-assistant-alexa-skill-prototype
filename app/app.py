@@ -4,7 +4,7 @@ from flask import Flask, request, jsonify, Response, g
 from flask_ask_sdk.skill_adapter import SkillAdapter
 from ask_sdk_webservice_support.verifier import RequestVerifier
 from skill.lambda_function import sb  # sb is the SkillBuilder from skill/lambda_function.py
-from skill import bell
+from skill import bell, html_page
 import json
 import music_assistant_api as ma_api
 import alexa_api as alexa_api
@@ -186,6 +186,9 @@ def _check_app_basic_auth():
     # The player page's doorbell image is loaded by the Show, which has no credentials
     if request.path.startswith('/bell/') and request.method == 'GET':
         return None
+    # The HTML player page's events: its page id is its only credential (see skill/html_page.py)
+    if request.path.startswith('/bell/html/') and request.method == 'POST':
+        return None
     # Read credentials from secrets (APP_USERNAME/APP_PASSWORD)
     app_user = get_env_secret('APP_USERNAME')
     app_pass = get_env_secret('APP_PASSWORD')
@@ -343,6 +346,53 @@ def bell_logo():
         resp = Response(f.read(), mimetype='image/png')
     resp.headers['Cache-Control'] = 'max-age=86400'
     return resp
+
+
+HTML_PAGE_PATH = Path(__file__).parent / 'skill' / 'html_page.html'
+
+
+@app.route('/bell/html/<page>', methods=['GET'])
+def html_player_page(page):
+    # The HTML player page (see skill/html_page.py), with its start state inline.
+    start = html_page.start_state(page)
+    if start is None:
+        return Response('Unknown page', 404)
+    start = json.dumps(start).replace('</', '<\\/')
+    resp = Response(HTML_PAGE_PATH.read_text().replace('/*START*/null', start), mimetype='text/html')
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
+@app.route('/bell/html/<page>/events', methods=['GET'])
+def html_player_events(page):
+    if html_page.start_state(page) is None:
+        return Response('Unknown page', 404)
+    resp = Response(html_page.stream(page), mimetype='text/event-stream')
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
+@app.route('/bell/html/<page>/state', methods=['POST'])
+def html_player_state(page):
+    body = request.get_json(silent=True) or {}
+    try:
+        seen, at, playing = int(body['seen']), max(int(body['at']), 0), bool(body['playing'])
+    except (KeyError, TypeError, ValueError):
+        return Response('Bad state', 400)
+    if not html_page.report(app.config['ALEXA_SKILL'], page, seen, at, playing):
+        return Response('Unknown page', 404)
+    return Response(status=204)
+
+
+@app.route('/bell/html/<page>/action', methods=['POST'])
+def html_player_action(page):
+    try:
+        done = html_page.act(app.config['ALEXA_SKILL'], page, request.get_json(silent=True))
+    except ValueError:
+        return Response('Bad action', 400)
+    if done is None:
+        return Response('Unknown page', 404)
+    return Response(status=204)
 
 
 # Expose OpenAPI spec and Swagger UI from the main app so docs are available

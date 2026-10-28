@@ -18,7 +18,7 @@ from ask_sdk_core.utils import is_request_type, is_intent_name
 from ask_sdk_core.handler_input import HandlerInput
 from ask_sdk_model import Response
 
-from . import (data, util, device_mapping, live_page, ma_control, track_time, bell, apl, ma_voice, sleep_timer,
+from . import (data, util, html_page, device_mapping, live_page, ma_control, track_time, bell, apl, ma_voice, sleep_timer,
                voice_commands, voice_match)
 
 sb = StandardSkillBuilder()
@@ -213,9 +213,23 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
         # restart that flow where it first started it, while MA's clock (and
         # with it track time and the next title) runs on from the old start.
         # PlayAudio is MA itself sending a new stream: play that.
-        if (is_request_type("LaunchRequest")(handler_input)
-                and _resume_through_ma(handler_input) == "ok"):
+        launch = is_request_type("LaunchRequest")(handler_input)
+        # The HTML page takes MA's new stream over the LAN, so it goes out
+        # first: MA then needn't make the Echo hear "play audio".
+        html = launch and html_page.wanted() and _supports_apl(handler_input) and util.apl_enabled()
+        if html:
+            apl.add_apl(handler_input.response_builder, start_paused=True, device_id=device_id)
+            live_page.closed(device_id)
+            live_page.heard_from(device_id)
+        resumed = launch and _resume_through_ma(handler_input) == "ok"
+        if resumed and html:
+            _watch_page(device_id)
+            return handler_input.response_builder.response
+        if resumed:
             return handler_input.response_builder.set_should_end_session(True).response
+        if html:
+            live_page.closed(device_id)
+            handler_input.response_builder.response.directives = None
         # MA had nothing to resume for this Echo's player. The stored stream
         # is then the latest of any player: another player's old stream
         # shows its album and plays nothing.
@@ -269,6 +283,32 @@ class LaunchRequestOrPlayAudioHandler(AbstractRequestHandler):
             live_page.closed(_device_id_from(handler_input))
             _watch_page(_device_id_from(handler_input))
         return response
+
+
+class HtmlPageRenewHandler(AbstractRequestHandler):
+    """The HTML page asks for a new page: Amazon closes it after 30 min without a touch or voice."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        return is_request_type("Alexa.Presentation.HTML.Message")(handler_input)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        device_id = _device_id_from(handler_input)
+        message = getattr(handler_input.request_envelope.request, "message", None) or {}
+        player_id = device_mapping.get_player_for_device(device_id)
+        if (not isinstance(message, dict) or message.get("renew") != bell.page_of(device_id)
+                or not player_id or ma_control.is_paused(player_id)):
+            return handler_input.response_builder.response
+        # As "Alexa, open music assistant": a new page, then MA's new stream for it.
+        apl.add_apl(handler_input.response_builder, start_paused=True, device_id=device_id)
+        live_page.closed(device_id)
+        live_page.heard_from(device_id)
+        if _resume_through_ma(handler_input) != "ok":
+            handler_input.response_builder.response.directives = None
+            return handler_input.response_builder.response
+        logger.info("Page %s renewed", message["renew"])
+        _watch_page(device_id)
+        return handler_input.response_builder.response
 
 
 # MA speaks "play audio" to the Echo about a second after sending its stream.
@@ -1838,6 +1878,26 @@ class APLSupportRequestInterceptor(AbstractRequestInterceptor):
             supported_interfaces = None
         handler_input.attributes_manager.request_attributes["supports_apl"] = (
             supported_interfaces is not None)
+        try:
+            supports_html = getattr(
+                handler_input.request_envelope.context.system.device.supported_interfaces,
+                'alexa_presentation_html', None) is not None
+        except AttributeError:
+            supports_html = False
+        html_page.want(bool(html_page.url()) and supports_html)
+        if (html_page.url() and supported_interfaces is not None and not supports_html
+                and is_request_type("LaunchRequest")(handler_input)):
+            logger.info("Echo has no HTML: it gets the APL page")
+
+
+class HtmlPageResponseInterceptor(AbstractResponseInterceptor):
+    """Send the APL commands of a reply to the Echo's HTML page (see html_page.py)."""
+    def process(self, handler_input, response):
+        if response is not None and html_page.wanted():
+            device_id = _device_id_from(handler_input)
+            if html_page.is_open(device_id):
+                html_page.drop_audio_player(response)
+            html_page.take_commands(device_id, response)
 
 class RequestLogger(AbstractRequestInterceptor):
     """Log the alexa requests."""
@@ -1927,6 +1987,7 @@ class ResponseLogger(AbstractResponseInterceptor):
 sb.add_request_handler(CheckAudioInterfaceHandler())
 sb.add_request_handler(SkillEventHandler())
 sb.add_request_handler(LaunchRequestOrPlayAudioHandler())
+sb.add_request_handler(HtmlPageRenewHandler())
 sb.add_request_handler(PlayCommandHandler())
 sb.add_request_handler(HelpIntentHandler())
 sb.add_request_handler(ExceptionEncounteredHandler())
@@ -1960,6 +2021,7 @@ sb.add_exception_handler(CatchAllExceptionHandler())
 sb.add_global_request_interceptor(APLSupportRequestInterceptor())
 sb.add_global_request_interceptor(RequestLogger())
 sb.add_global_request_interceptor(LocalizationInterceptor())
+sb.add_global_response_interceptor(HtmlPageResponseInterceptor())
 sb.add_global_response_interceptor(ResponseLogger())
 
 # AWS Lambda handler

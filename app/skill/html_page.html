@@ -1,0 +1,207 @@
+<!doctype html>
+<!-- The player page as a web app (see html_page.py); it looks like apl_document.json's page. -->
+<html><head><meta charset="utf-8"><title>Music Assistant</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdn.html.games.alexa.a2z.com/alexa-html/latest/alexa-html.js"></script>
+<style>
+:root { --u: min(100vw / 1280, 100vh / 800); --accent: #18BCF2; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; position: relative; background: #000; color: #fff;
+  font-family: "Amazon Ember", "Bookerly", sans-serif; user-select: none; }
+#bg { position: absolute; inset: -5%; background: center/cover no-repeat; filter: blur(30px); opacity: .15; }
+#clock { position: absolute; left: calc(48 * var(--u)); top: calc(24 * var(--u)); font-size: calc(44 * var(--u)); opacity: .8; }
+#logo { position: absolute; right: calc(48 * var(--u)); top: calc(24 * var(--u)); height: calc(36 * var(--u)); opacity: .3; }
+#main { position: absolute; left: calc(48 * var(--u)); right: calc(48 * var(--u)); top: 15%; bottom: calc(24 * var(--u));
+  display: flex; flex-direction: column; gap: calc(20 * var(--u)); }
+#track { flex: 1; min-height: 0; display: flex; gap: calc(32 * var(--u)); }
+#cover { height: 100%; aspect-ratio: 1;
+  object-fit: cover; border-radius: calc(8 * var(--u)); box-shadow: 0 calc(8 * var(--u)) calc(24 * var(--u)) rgba(0,0,0,.6); flex: none; }
+#right { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: calc(16 * var(--u)); padding-top: calc(16 * var(--u)); }
+.panel { background: rgba(0,0,0,.55); border-radius: calc(16 * var(--u)); padding: calc(20 * var(--u)) calc(28 * var(--u)); }
+#title { font-size: calc(56 * var(--u)); font-weight: 500; line-height: 1.15; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+#title.s1 { font-size: calc(40 * var(--u)); } #title.s2 { font-size: calc(32 * var(--u)); }
+#artist { font-size: calc(32 * var(--u)); margin-top: calc(8 * var(--u)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#album { font-size: calc(24 * var(--u)); opacity: .7; margin-top: calc(6 * var(--u)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#upnext { margin-top: auto; align-self: flex-end; width: 60%; min-width: calc(320 * var(--u)); display: flex; gap: calc(14 * var(--u)); align-items: center;
+  background: rgba(0,0,0,.55); border-radius: calc(12 * var(--u)); padding: calc(12 * var(--u)); opacity: .8; }
+#upnext img { width: calc(76 * var(--u)); height: calc(76 * var(--u)); object-fit: cover; border-radius: calc(4 * var(--u)); flex: none; }
+#upnext div { min-width: 0; } #upnext div div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#nextLabel { font-size: calc(16 * var(--u)); color: var(--accent); } #nextTitle { font-size: calc(26 * var(--u)); }
+#nextArtist { font-size: calc(20 * var(--u)); opacity: .8; }
+#controls { margin-top: auto; padding-top: calc(14 * var(--u)); padding-bottom: calc(10 * var(--u)); }
+#sliderRow { display: flex; align-items: center; gap: calc(16 * var(--u)); font-size: calc(20 * var(--u)); }
+#slider { flex: 1; accent-color: var(--accent); height: calc(28 * var(--u)); }
+#bar { flex: 1; height: calc(4 * var(--u)); background: rgba(255,255,255,.2); overflow: hidden; display: none; }
+#bar::after { content: ""; display: block; width: 30%; height: 100%; background: var(--accent); animation: sweep 1.6s linear infinite; }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+#quality { text-align: center; font-size: calc(16 * var(--u)); opacity: .5; min-height: 1em; }
+#buttons { display: flex; justify-content: center; align-items: center; gap: calc(28 * var(--u)); margin-top: calc(6 * var(--u)); }
+#buttons button { width: calc(92 * var(--u)); height: calc(92 * var(--u)); border: 0; border-radius: 50%; background: none; padding: calc(14 * var(--u)); }
+#buttons button:active { background: rgba(255,255,255,.15); }
+#buttons svg { width: 100%; height: 100%; fill: #fff; }
+#PlayPause svg { fill: var(--accent); }
+#buttons .on path:last-child { fill: var(--accent); stroke: var(--accent); }
+.hidden { visibility: hidden; }
+#busy { position: absolute; inset: 0; background: rgba(0,0,0,.65); display: none; align-items: center; justify-content: center; gap: calc(16 * var(--u)); }
+#busy i { width: calc(20 * var(--u)); height: calc(20 * var(--u)); border-radius: 50%; background: #fff; animation: dot 1.2s infinite; }
+#busy i:nth-child(2) { animation-delay: .2s; } #busy i:nth-child(3) { animation-delay: .4s; }
+@keyframes dot { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
+</style></head><body>
+<div id="bg"></div>
+<div id="clock"></div>
+<img id="logo" src="/bell/logo.png" alt="">
+<div id="main">
+  <div id="track">
+    <img id="cover" alt="">
+    <div id="right">
+      <div class="panel"><div id="title"></div><div id="artist"></div><div id="album"></div></div>
+      <div id="upnext" class="hidden"><img id="nextImage" alt=""><div>
+        <div id="nextLabel">Up next</div><div id="nextTitle"></div><div id="nextArtist"></div></div></div>
+    </div>
+  </div>
+  <div id="controls" class="panel">
+    <div id="sliderRow"><span id="elapsed">0:00</span>
+      <input id="slider" type="range" min="0" max="0" value="0"><div id="bar"></div>
+      <span id="total">0:00</span></div>
+    <div id="quality"></div>
+    <div id="buttons">
+      <button id="FavAlbum"><svg viewBox="0 0 24 24"><path d="M5.5 5.5h13v13H5.5z" fill="none" stroke="#fff" stroke-width="1.5"/>
+        <path transform="translate(7.8,7.6) scale(.35)" fill="none" stroke="#fff" stroke-width="4.5" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></button>
+      <button id="Shuffle"><svg viewBox="0 0 24 24"><path transform="translate(3,3) scale(.75)" d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg></button>
+      <button id="Previous"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>
+      <button id="PlayPause"><svg viewBox="0 0 24 24"><path id="playIcon" d="M8 5v14l11-7z"/></svg></button>
+      <button id="Next"><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
+      <button id="Repeat"><svg viewBox="0 0 24 24"><path id="repeatIcon" d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg></button>
+      <button id="FavSong"><svg viewBox="0 0 24 24"><path transform="translate(4.2,4.07) scale(.65)" fill="none" stroke="#fff" stroke-width="2.4" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></button>
+    </div>
+  </div>
+</div>
+<div id="busy"><i></i><i></i><i></i></div>
+<audio id="audio" preload="auto"></audio>
+<script>
+// What the page shows first; the skill fills it in (html_page.start_state).
+const START = /*START*/null;
+const BASE = location.pathname + '/';
+const RENEW_MS = 25 * 60 * 1000;
+const $ = id => document.getElementById(id);
+const audio = $('audio');
+const ICONS = {
+  play: 'M8 5v14l11-7z', pause: 'M6 19h4V5H6v14zm8-14v14h4V5h-4z',
+  repeat: 'M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z',
+};
+ICONS.repeatOne = ICONS.repeat + 'm-4-2V9h-1l-2 1v1h1.5v4H13z';
+
+// Times are in ms. trackOffset is where the current track starts in the
+// stream: MA plays the whole queue as one stream. -1 hides a button.
+const state = Object.assign({
+  title: '', artist: '', album: '', titleSize: 0, cover: '', background: '', quality: '',
+  trackOffset: 0, trackDuration: 0, queueEnd: 0, seen: 0,
+  nextTitle: '', nextTitleSize: 0, nextArtist: '', nextAlbum: '', nextQuality: '', nextImage: '', nextDuration: -1,
+  songFavorite: -1, albumFavorite: -1, shuffle: -1, repeat: -1,
+}, START);
+let seeking = false, queueEnded = false;
+
+const position = () => Math.floor(audio.currentTime * 1000);
+const trackPosition = () => Math.max(0, position() - state.trackOffset);
+const time = ms => { const t = Math.floor(Math.max(0, ms) / 1000);
+  return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
+const post = (path, body) => fetch(BASE + path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body) }).catch(() => {});
+
+function setImage(img, src) { if (src && img.getAttribute('src') !== src) img.src = src; }
+
+function render() {
+  $('title').textContent = state.title; $('title').className = state.titleSize ? 's' + state.titleSize : '';
+  $('artist').textContent = state.artist; $('album').textContent = state.album;
+  setImage($('cover'), state.cover);
+  $('bg').style.backgroundImage = state.background ? `url("${state.background}")` : '';
+  $('quality').textContent = state.quality;
+  $('nextTitle').textContent = state.nextTitle; $('nextArtist').textContent = state.nextArtist;
+  setImage($('nextImage'), state.nextImage);
+  $('upnext').classList.toggle('hidden', !(state.nextDuration >= 0 && state.nextTitle));
+  const radio = !state.trackDuration;
+  $('slider').style.display = radio ? 'none' : ''; $('bar').style.display = radio ? 'block' : 'none';
+  $('total').textContent = radio ? '' : time(state.trackDuration);
+  $('slider').max = state.trackDuration;
+  if (!seeking) { $('slider').value = trackPosition(); $('elapsed').textContent = time(trackPosition()); }
+  for (const [id, key] of [['FavSong', 'songFavorite'], ['FavAlbum', 'albumFavorite'], ['Shuffle', 'shuffle'], ['Repeat', 'repeat']]) {
+    $(id).classList.toggle('hidden', state[key] < 0); $(id).classList.toggle('on', state[key] > 0);
+  }
+  $('repeatIcon').setAttribute('d', state.repeat === 2 ? ICONS.repeatOne : ICONS.repeat);
+  $('playIcon').setAttribute('d', audio.paused ? ICONS.play : ICONS.pause);
+}
+
+function busy(on) { $('busy').style.display = on ? 'flex' : 'none'; }
+function play() { audio.play().catch(e => console.log('play: ' + e)); }
+
+// From the skill: {set: {...}, src: new stream, media: 'play'|'pause', ready: true}
+const events = new EventSource(BASE + 'events');
+events.onmessage = e => {
+  const msg = JSON.parse(e.data);
+  Object.assign(state, msg.set);
+  if (msg.ready || msg.src) busy(false);
+  if (msg.src) audio.src = msg.src;
+  if (msg.media === 'play') play(); else if (msg.media === 'pause') audio.pause();
+  render();
+};
+
+// Where the page is, every second: the skill sends what it hasn't seen.
+const report = () => post('state', { seen: state.seen, at: position(), playing: !audio.paused });
+setInterval(report, 1000);
+
+audio.addEventListener('timeupdate', () => {
+  // The next track starts in the same stream: show it without asking the skill.
+  if (state.nextDuration >= 0 && state.trackDuration > 0 && trackPosition() >= state.trackDuration) {
+    Object.assign(state, {
+      trackOffset: state.trackOffset + state.trackDuration, trackDuration: state.nextDuration,
+      title: state.nextTitle, titleSize: state.nextTitleSize, artist: state.nextArtist,
+      album: state.nextAlbum, quality: state.nextQuality, nextDuration: -1,
+    });
+    if (state.nextImage) state.cover = state.background = state.nextImage;
+  }
+  // MA's queue ends here: stop, or the stream plays on into old music.
+  if (state.queueEnd > 0 && position() >= state.queueEnd - 1000) {
+    state.queueEnd = 0; queueEnded = true; audio.pause();
+  }
+  render();
+});
+audio.addEventListener('playing', () => { busy(false); render(); });
+audio.addEventListener('pause', () => {
+  if (queueEnded) { queueEnded = false; post('action', { action: 'queue_ended' }); }
+  render();
+});
+setInterval(() => {
+  const near = state.trackDuration > 0 && state.trackOffset + state.trackDuration - position() <= 20000;
+  $('upnext').style.opacity = near ? 1 : .8;
+  const d = new Date(); $('clock').textContent = d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
+}, 250);
+
+// Buttons that wait for MA's new stream pause the page meanwhile.
+function waitFor(action) { audio.pause(); busy(true); post('action', action); }
+$('cover').onclick = () => waitFor({ action: 'play_album' });
+$('Previous').onclick = () => waitFor({ action: 'previous' });
+$('Next').onclick = () => waitFor({ action: 'next' });
+$('PlayPause').onclick = () => {
+  if (audio.paused) { busy(true); post('action', { action: 'play', position: trackPosition() }); }
+  else { post('action', { action: 'pause', position: trackPosition() }); audio.pause(); }
+};
+function toggle(key, action) { state[key] = state[key] === 1 ? 0 : 1; post('action', { action, on: state[key] === 1 }); render(); }
+$('FavSong').onclick = () => toggle('songFavorite', 'favorite_song');
+$('FavAlbum').onclick = () => toggle('albumFavorite', 'favorite_album');
+$('Shuffle').onclick = () => toggle('shuffle', 'shuffle');
+$('Repeat').onclick = () => post('action', { action: 'repeat', mode: (state.repeat + 1) % 3 });
+$('slider').oninput = () => { seeking = true; $('elapsed').textContent = time($('slider').value); };
+$('slider').onchange = () => { seeking = false; waitFor({ action: 'seek', position: Number($('slider').value) }); };
+
+try {
+  // Amazon closes the page after 30 min without a touch or voice: ask the skill for a new one first.
+  Alexa.create({ version: '1.1' }).then(({ alexa }) => setTimeout(() =>
+    alexa.skill.sendMessage({ renew: location.pathname.split('/').pop() }), RENEW_MS))
+    .catch(e => console.log('alexa: ' + e));
+} catch (e) { console.log('no alexa sdk: ' + e); }
+audio.src = state.stream;
+if (state.autoplay) play();
+report();   // at once: MA's new stream may already wait for this page
+render();
+</script></body></html>

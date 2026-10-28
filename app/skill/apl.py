@@ -7,7 +7,7 @@ import secrets
 import sys
 from ask_sdk_model.interfaces.alexa.presentation.apl import RenderDocumentDirective
 from ask_sdk_core.response_helper import ResponseFactory
-from . import bell, data, track_time
+from . import bell, data, html_page, track_time
 
 # Ensure /app/src is on the Python path so shared_store can be imported
 _app_src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -134,6 +134,7 @@ def add_apl(response_builder, start_paused=False, device_id=None):
             component["autoplay"] = autoplay
 
     # Update mainTemplate with metadata values
+    bell_page = ""
     try:
         main_template_item = apl_document["mainTemplate"]["items"][0]
         main_template_item.update({
@@ -149,7 +150,7 @@ def add_apl(response_builder, start_paused=False, device_id=None):
             "primaryTextSize": track_time.title_size(metadata.get("primaryText")),
         })
         # The page's doorbell (see bell.py): where the Show finds the skill on the LAN
-        bell_page = bell.new_page(device_id)
+        bell_page = bell.new_page(device_id, always=html_page.wanted())
         page_id = bell_page or secrets.token_hex(8)
         # its first update must not set these again: a new background flashes
         images_on(page_id).update(cover=cover_image, background=background_image)
@@ -165,6 +166,11 @@ def add_apl(response_builder, start_paused=False, device_id=None):
                                            start_values.get("startDuration")))
     except (KeyError, IndexError):
         logging.warning("Could not update mainTemplate in APL document")
+
+    if html_page.wanted() and bell_page:
+        html_page.started(bell_page, main_template_item, autoplay)
+        response_builder.add_directive(html_page.start_directive(bell_page))
+        return
 
     response_builder.add_directive(
         RenderDocumentDirective(
