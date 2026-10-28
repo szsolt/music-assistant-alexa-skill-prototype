@@ -87,3 +87,4 @@ addons/music-assistant-skill/scripts
 
 # ASK CLI data
 ask_data/
+.superpowers/
