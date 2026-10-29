@@ -258,7 +258,7 @@ def act(skill, page_id, action):
 # Playlist, lyrics, browse and player options: run on MA directly, not as APL presses.
 _MA_ACTIONS = ("queue", "move", "play_next", "move_end", "delete", "clear", "mix", "wave",
                "lyrics", "options", "sleep", "autoplay", "crossfade", "play_media", "browse", "favorite", "now",
-               "players", "transfer")
+               "players", "transfer", "playlists", "add_to_playlist")
 _BROWSE_KINDS = ("favorites", "recent", "search", "open", "playing")
 _PLAY_OPTIONS = {"replace": "", "next": "Playing next", "add": "Added to the queue"}
 
@@ -280,6 +280,9 @@ def _on_ma(page_id, action):
     0: off), "autoplay" and "crossfade" (on): send {"options": ma_control.options}.
     "players": send {"players": [[player_id, name]]}, the others the music can move to.
     "transfer" (target, name): move the queue there, as the voice command; sends {"toast": text}.
+    "playlists": send {"playlists": [[playlist_id, name]]}, the ones songs can be added to.
+    "add_to_playlist" (playlist, empty: a new one named name; uri, item or queue: what
+    to add): sends {"toast": text}.
     """
     kind = action["action"]
     try:
@@ -297,6 +300,11 @@ def _on_ma(page_id, action):
         browse = str(action.get("kind")) if kind == "browse" else "favorites"
         text = str(action.get("text") or "")[:200]
         target, name = (str(action["target"]), str(action.get("name") or "")[:100]) if kind == "transfer" else ("", "")
+        if kind == "add_to_playlist":
+            playlist, name = str(action.get("playlist") or ""), str(action.get("name") or "").strip()[:100]
+            uri = str(action.get("uri") or "")[:500]
+            if not name:
+                raise ValueError("no playlist name")
         if option not in _PLAY_OPTIONS or browse not in _BROWSE_KINDS or (kind == "play_media" and not uri):
             raise ValueError("bad option")
     except (KeyError, TypeError, ValueError):
@@ -324,6 +332,12 @@ def _on_ma(page_id, action):
         except (ma_voice.MAUnavailable, ma_voice.MAFailed) as e:
             logger.warning("Could not %s for player %s: %s", "list the players" if kind == "players" else "move the music", player_id, e)
             update = {"toast": "Music Assistant did not do it"}
+    elif kind == "playlists":
+        playlists = ma_control.playlists(player_id)
+        update = {"playlists": playlists} if playlists is not None else {"toast": "Music Assistant did not do it"}
+    elif kind == "add_to_playlist":
+        added = ma_control.add_to_playlist(player_id, playlist, name, uri, item, bool(action.get("queue")))
+        update = {"toast": "Added to " + added if added else "Music Assistant did not do it"}
     elif kind == "browse":
         update = {"browse": ma_control.browse(player_id, browse, text, item or None) or {"title": "", "sections": []}}
     elif kind == "now":

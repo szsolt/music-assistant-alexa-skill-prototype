@@ -103,6 +103,13 @@ class _Client:
         async def remove_item_from_favorites(media_type, item_id):
             calls.append(("unfavorite", media_type, item_id))
 
+        async def create_playlist(name):
+            calls.append(("create_playlist", name))
+            return SimpleNamespace(item_id="21", name=name)
+
+        async def add_playlist_tracks(db_playlist_id, uris):
+            calls.append(("add_tracks", db_playlist_id, uris))
+
         async def listing(name, *args, **kwargs):
             calls.append((name,) + args + tuple(sorted(kwargs.items())))
             return {"artist_albums": ALBUMS, "library_albums": ALBUMS, "library_playlists": [],
@@ -112,6 +119,7 @@ class _Client:
                                      get_item=get_item, get_library_item_by_prov_id=get_library_item_by_prov_id,
                                      add_item_to_favorites=add_item_to_favorites,
                                      remove_item_from_favorites=remove_item_from_favorites,
+                                     create_playlist=create_playlist, add_playlist_tracks=add_playlist_tracks,
                                      **{f"get_{name}": (lambda name: lambda *a, **k: listing(name, *a, **k))(name)
                                         for name in ("artist_tracks", "artist_albums", "playlist_tracks",
                                                      "library_albums", "library_playlists", "library_artists",
@@ -333,3 +341,30 @@ def test_favourite_an_album(monkeypatch):
 def test_unfavourite_an_album(monkeypatch):
     assert _run(monkeypatch, ma_control._set_favorite, "library://album/7", False) == (
         True, [("unfavorite", MediaType.ALBUM, "7")])
+
+
+def test_playlists_lists_the_ones_that_take_songs():
+    client = _Client([])
+
+    async def get_library_playlists(**kwargs):
+        return [SimpleNamespace(PLAYLIST.__dict__ | {"is_editable": True}),
+                SimpleNamespace(PLAYLIST.__dict__ | {"item_id": "5", "name": "Daily Mix 1", "is_editable": False})]
+    client.music.get_library_playlists = get_library_playlists
+    assert asyncio.run(ma_control._playlists(client, "Office")) == [["2", "Esti dal"]]
+
+
+def test_add_a_song_to_a_playlist(monkeypatch):
+    assert _run(monkeypatch, ma_control._add_to_playlist, "2", "Esti dal", "library://track/12", "", False) == (
+        "Esti dal", [("add_tracks", "2", ["library://track/12"])])
+
+
+def test_add_a_queue_song_to_a_playlist(monkeypatch):
+    name, calls = _run(monkeypatch, ma_control._add_to_playlist, "2", "Esti dal", "", "q3", False)
+    assert (name, calls[-1]) == ("Esti dal", ("add_tracks", "2", ["library://track/4"]))
+
+
+def test_save_the_queue_as_a_new_playlist(monkeypatch):
+    name, calls = _run(monkeypatch, ma_control._add_to_playlist, "", "Esti mix", "", "", True)
+    assert name == "Esti mix"
+    assert ("create_playlist", "Esti mix") in calls
+    assert calls[-1] == ("add_tracks", "21", [f"library://track/{n + 1}" for n in range(len(TITLES))])

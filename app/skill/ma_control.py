@@ -471,6 +471,29 @@ async def _set_favorite(client, player_id, uri, on):
     return True
 
 
+async def _playlists(client, player_id):
+    return [[p.item_id, p.name] for p in await client.music.get_library_playlists() if p.is_editable]
+
+
+async def _add_to_playlist(client, player_id, playlist_id, name, uri, item_id, queue):
+    if uri:
+        uris = [uri]    # MA adds an album's or a playlist's songs
+    else:
+        active = await client.player_queues.get_active_queue(player_id)
+        if active is None:
+            return None
+        items = await _all_items(client, active)
+        if not queue:
+            items = [i for i in items if i.queue_item_id == item_id]
+        uris = [i.media_item.uri for i in items if i.media_item is not None]
+        if not uris:
+            return None
+    if not playlist_id:
+        playlist_id = (await client.music.create_playlist(name)).item_id    # in MA's own library
+    await client.music.add_playlist_tracks(playlist_id, uris)
+    return name
+
+
 def _call(what, fn, player_id, *args):
     """fn(client, player_id, *args) on MA, or None on failure."""
     try:
@@ -553,3 +576,16 @@ def browse(player_id, kind, text="", item_id=None):
 def set_favorite(player_id, uri, on):
     """Make uri (an artist, album or playlist) a favourite, or not one. True if MA did it."""
     return bool(_call("change a favourite", _set_favorite, player_id, uri, on))
+
+
+def playlists(player_id):
+    """[[playlist_id, name]] of the library playlists songs can be added to, or None."""
+    return _call("list the playlists", _playlists, player_id)
+
+
+def add_to_playlist(player_id, playlist_id, name, uri="", item_id="", queue=False):
+    """Add uri (a song, album or playlist), queue item item_id, or the whole queue to a playlist.
+
+    Empty playlist_id: a new playlist named name. Returns the name, or None.
+    """
+    return _call("add to a playlist", _add_to_playlist, player_id, playlist_id, name, uri, item_id, queue)

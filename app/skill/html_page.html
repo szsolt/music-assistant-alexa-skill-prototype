@@ -88,6 +88,12 @@ html, body { margin: 0; height: 100%; overflow: hidden; position: relative; back
 #menu div { font-size: calc(30 * var(--u)); padding: calc(18 * var(--u)) calc(32 * var(--u)); display: flex; align-items: center; gap: calc(24 * var(--u)); }
 #menu { max-width: 70vw; } #menu span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #menu svg { width: calc(36 * var(--u)); height: calc(36 * var(--u)); fill: #fff; flex: none; }
+#ask { position: absolute; z-index: 4; display: none; left: 50%; top: 20%; transform: translateX(-50%); width: 70vw;
+  background: #232323; border-radius: calc(12 * var(--u)); box-shadow: 0 8px 24px rgba(0,0,0,.9);
+  padding: calc(18 * var(--u)); gap: calc(16 * var(--u)); align-items: center; }
+#askName { flex: 1; min-width: 0; font: inherit; font-size: calc(30 * var(--u)); color: #fff; background: #333; border: none;
+  border-radius: calc(12 * var(--u)); padding: calc(14 * var(--u)) calc(20 * var(--u)); }
+#askOk { font-size: calc(30 * var(--u)); color: var(--accent); padding: calc(14 * var(--u)) calc(20 * var(--u)); }
 #sheetHead { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #sheetBody { flex: 1; min-height: 0; overflow-y: auto; scroll-behavior: smooth; }
 /* every list shows where it is, as touch screens hide the scroll bar */
@@ -186,12 +192,13 @@ html, body { margin: 0; height: 100%; overflow: hidden; position: relative; back
   </div>
 </div>
 <div id="pl"><h4><span id="plHead"></span><span id="plClose">✕</span></h4>
-<div id="plOpts"><span id="plAuto">Autoplay</span><span id="plFade"><svg class="rings" viewBox="0 0 24 24"><circle cx="9" cy="9" r="7"/><circle cx="15" cy="15" r="7"/></svg>Crossfade</span><span id="plClear">Clear</span><span id="plMove">Move to…</span></div><div id="plBox"><div id="plList"></div></div></div>
+<div id="plOpts"><span id="plAuto">Autoplay</span><span id="plFade"><svg class="rings" viewBox="0 0 24 24"><circle cx="9" cy="9" r="7"/><circle cx="15" cy="15" r="7"/></svg>Crossfade</span><span id="plClear">Clear</span><span id="plMove">Move to…</span><span id="plSave">Save</span></div><div id="plBox"><div id="plList"></div></div></div>
 <div id="sheet"><h4><span id="sheetBack">‹</span><span id="sheetHead"></span><span id="sheetFav" class="heart"><svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></span><span id="sheetMore" class="more">⋮</span><span id="sheetClose">✕</span></h4>
 <div id="bBar"><input id="q" type="search" enterkeyhint="search" placeholder="Search"><span id="bGo"><svg viewBox="0 0 24 24"><path id="bGoIcon"/></svg></span>
 <span id="bFav">Favourites</span><span id="bRecent">Recent</span></div><div id="sheetBody"></div></div>
 <div id="toast"></div>
 <div id="shade"></div><div id="menu"></div>
+<div id="ask"><input id="askName" placeholder="Playlist name" maxlength="100" enterkeyhint="done"><span id="askOk">Create</span></div>
 <div id="busy"><i></i><i></i><i></i></div>
 <audio id="audio" preload="auto"></audio>
 <script>
@@ -239,6 +246,7 @@ Object.assign(ICONS, {   // Material icons: subject, bedtime, autorenew, speaker
   lyrics: 'M14 17H4v2h10v-2zm6-8H4v2h16V9zM4 15h16v-2H4v2zM4 5v2h16V5H4z',
   sleep: 'M12.34 2.02C6.59 1.82 2 6.42 2 12c0 5.52 4.48 10 10 10 3.71 0 6.93-2.02 8.66-5.02-7.51-.25-12.09-8.43-8.32-14.96z',
   autoplay: 'M12 6v3l4-4-4-4v3c-4.42 0-8 3.58-8 8 0 1.57.46 3.03 1.24 4.26L6.7 14.8c-.45-.83-.7-1.79-.7-2.8 0-3.31 2.69-6 6-6zm6.76 1.74L17.3 9.2c.44.84.7 1.79.7 2.8 0 3.31-2.69 6-6 6v-3l-4 4 4 4v-3c4.42 0 8-3.58 8-8 0-1.57-.46-3.03-1.24-4.26z',
+  playlist: 'M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z',
   speaker: 'M17 2H7c-1.1 0-2 .9-2 2v16c0 1.1.9 1.99 2 1.99L17 22c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-5 2c1.1 0 2 .9 2 2s-.9 2-2 2c-1.11 0-2-.9-2-2s.89-2 2-2zm0 16c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z',
   off: 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
 });
@@ -351,6 +359,8 @@ events.onmessage = e => {
   if (msg.media === 'play') play(); else if (msg.media === 'pause') audio.pause();
   if (msg.players) showMenu(msg.players.map(([target, name]) => [name, ICONS.speaker, true,
     () => post('action', { action: 'transfer', target, name })]), $('plMove'));
+  if (msg.playlists && addTo.what) showMenu([['New playlist…', ICONS.add, true, askName],
+    ...msg.playlists.map(([id, name]) => [name, ICONS.playlist, true, () => toPlaylist(id, name)])], addTo.from);
   if (msg.queue) { pl.win = msg.queue; pl.offset = msg.queue.offset; drawOpts(); if (pl.open && !pl.dragging) drawList(); }
   else if (pl.open) { clearTimeout(pl.timer); pl.timer = setTimeout(askQueue, 1000); }
   render();
@@ -437,15 +447,16 @@ function openList() {
 function drawOpts() {
   $('plAuto').className = opts.autoplay ? 'on' : '';
   $('plFade').className = opts.crossfade ? 'on' : '';
-  $('plClear').style.display = $('plMove').style.display = pl.win && pl.win.total ? '' : 'none';
+  $('plClear').style.display = $('plMove').style.display = $('plSave').style.display = pl.win && pl.win.total ? '' : 'none';
 }
-[['plAuto', ICONS.autoplay], ['plClear', ICONS.delete], ['plMove', ICONS.speaker]].forEach(([id, d]) =>
+[['plAuto', ICONS.autoplay], ['plClear', ICONS.delete], ['plMove', ICONS.speaker], ['plSave', ICONS.playlist]].forEach(([id, d]) =>
   $(id).insertAdjacentHTML('afterbegin', '<svg viewBox="0 0 24 24"><path d="' + d + '"/></svg>'));
 $('plAuto').onclick = () => post('action', { action: 'autoplay', on: !opts.autoplay });
 $('plFade').onclick = () => post('action', { action: 'crossfade', on: !opts.crossfade });
 $('plClear').onclick = () => showMenu([['Clear the queue', ICONS.delete, true,
   () => post('action', { action: 'clear', offset: -1, limit: pl.limit })]], $('plClear'));
 $('plMove').onclick = () => post('action', { action: 'players' });
+$('plSave').onclick = () => addToPlaylist({ queue: true }, $('plSave'));
 function closeList() { pl.open = false; closeMenu(); $('pl').style.display = 'none'; }
 function plTick() {
   const w = pl.win; if (!w) return;
@@ -499,6 +510,7 @@ function openMenu(it, i, row) {
             ['Play next', ICONS.playNext, free && i !== w.locked + 1, () => edit('play_next')],
             ['Endless mix', ICONS.mix, true, () => { closeList(); waitFor({ action: 'mix', item: it.item_id }); }],
             ['Move to end', ICONS.toEnd, free && i < w.total - 1, () => edit('move_end')],
+            ['Add to playlist', ICONS.playlist, true, () => addToPlaylist({ item: it.item_id }, row.querySelector('.more'))],
             ['Delete', ICONS.delete, free, () => edit('delete')]], row.querySelector('.more'));
 }
 // A menu of [label, icon, shown, run] under (or, without room, above) the element it opens from.
@@ -520,7 +532,18 @@ function showMenu(entries, from, redraw) {
   m.style.left = Math.max(8, Math.min(r.right, window.innerWidth - 8) - m.offsetWidth) + 'px';
   m.style.top = (r.bottom + m.offsetHeight + 8 <= H ? r.bottom : Math.max(8, r.top - m.offsetHeight)) + 'px';
 }
-function closeMenu() { menu.redraw = null; $('menu').style.display = $('shade').style.display = 'none'; }
+function closeMenu() { menu.redraw = null; $('menu').style.display = $('shade').style.display = $('ask').style.display = 'none'; }
+// Add to playlist: what to add waits here while MA lists the playlists.
+const addTo = { what: null, from: null };
+function addToPlaylist(what, from) { Object.assign(addTo, { what, from }); post('action', { action: 'playlists' }); }
+const toPlaylist = (playlist, name) => post('action', { action: 'add_to_playlist', playlist, name, ...addTo.what });
+function askName() {
+  $('askName').value = '';
+  $('ask').style.display = 'flex'; $('shade').style.display = 'block';
+  $('askName').focus();
+}
+$('askOk').onclick = () => { const name = $('askName').value.trim(); if (name) { closeMenu(); toPlaylist('', name); } };
+$('askName').onkeydown = e => { if (e.key === 'Enter') $('askOk').onclick(); };
 $('shade').onclick = closeMenu;
 function pick(it, i) {
   closeList();
@@ -758,6 +781,7 @@ function itemMenu(more, r, it) {
     showMenu([['Play now', ICONS.play, true, () => { closeSheet(); waitFor({ action: 'play_media', uri: it.uri }); }],
               ['Play next', ICONS.playNext, true, () => add('next')],
               ['Add to queue', ICONS.add, true, () => add('add')],
+              ['Add to playlist', ICONS.playlist, /:\/\/(track|album|playlist)\//.test(it.uri), () => addToPlaylist({ uri: it.uri }, more)],
               ...(it.go || []).filter(go => go[2] !== r.item).map(([kind, name, uri]) => ['View ' + kind + ' ' + name, ICONS[kind], true,
                                                           () => browse('open', uri, true)])], more);
   };

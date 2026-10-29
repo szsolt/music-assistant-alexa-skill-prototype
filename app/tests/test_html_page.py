@@ -188,6 +188,10 @@ def _playlist(monkeypatch):
                         calls.append(("now", item_id)) or ["library://track/14", "library://album/7"])
     monkeypatch.setattr(ma_control, "set_favorite", lambda player_id, uri, on:
                         calls.append(("favorite", uri, on)) or uri != "library://album/9")
+    monkeypatch.setattr(ma_control, "playlists", lambda player_id: [["2", "Esti dal"]])
+    monkeypatch.setattr(ma_control, "add_to_playlist",
+                        lambda player_id, playlist_id, name, uri="", item_id="", queue=False:
+                        calls.append(("add", playlist_id, name, uri, item_id, queue)) or (name if name != "Ringató" else None))
     page = _html_page()
     return page, html_page.stream(page), calls
 
@@ -395,3 +399,41 @@ def test_the_page_is_open_while_it_holds_its_stream():
     assert html_page.is_open("d")
     stream.close()
     assert not html_page.is_open("d")
+
+
+def test_page_lists_the_playlists(monkeypatch):
+    page, stream, _ = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "playlists"})
+    assert json.loads(next(stream)[len("data: "):]) == {"playlists": [["2", "Esti dal"]]}
+
+
+def test_page_adds_to_a_playlist(monkeypatch):
+    page, stream, calls = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "add_to_playlist", "playlist": "2", "name": "Esti dal",
+                                      "uri": "library://album/7"})
+    assert calls == [("add", "2", "Esti dal", "library://album/7", "", False)]
+    assert json.loads(next(stream)[len("data: "):]) == {"toast": "Added to Esti dal"}
+
+
+def test_page_saves_the_queue_as_a_new_playlist(monkeypatch):
+    page, stream, calls = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "add_to_playlist", "playlist": "", "name": "Esti mix", "queue": True})
+    assert calls == [("add", "", "Esti mix", "", "", True)]
+    assert json.loads(next(stream)[len("data: "):]) == {"toast": "Added to Esti mix"}
+
+
+def test_page_add_to_playlist_that_fails_says_so(monkeypatch):
+    page, stream, _ = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "add_to_playlist", "playlist": "3", "name": "Ringató", "item": "q3"})
+    assert json.loads(next(stream)[len("data: "):]) == {"toast": "Music Assistant did not do it"}
+
+
+def test_page_new_playlist_needs_a_name(monkeypatch):
+    page, _, calls = _playlist(monkeypatch)
+    with pytest.raises(ValueError):
+        html_page.act(None, page, {"action": "add_to_playlist", "playlist": "", "name": " ", "queue": True})
+    assert calls == []
