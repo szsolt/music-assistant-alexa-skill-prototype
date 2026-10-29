@@ -360,7 +360,8 @@ async def _play_media(client, player_id, uri, option, start):
 
 _PLAY_OPTIONS = {"replace": QueueOption.REPLACE, "next": QueueOption.NEXT, "add": QueueOption.ADD}
 _SEARCH_TYPES = (("Artists", MediaType.ARTIST, "artists"), ("Albums", MediaType.ALBUM, "albums"),
-                 ("Playlists", MediaType.PLAYLIST, "playlists"), ("Songs", MediaType.TRACK, "tracks"))
+                 ("Playlists", MediaType.PLAYLIST, "playlists"), ("Songs", MediaType.TRACK, "tracks"),
+                 ("Podcasts", MediaType.PODCAST, "podcasts"), ("Audiobooks", MediaType.AUDIOBOOK, "audiobooks"))
 
 
 def _image_url(client, item, size):
@@ -378,10 +379,20 @@ def _image_url(client, item, size):
     return client.get_image_url(image, size)
 
 
-def _row(client, item):
-    """A browse row: {"uri", "type", "name", "sub", "image", "duration_ms", "disc", "favorite", "go"}.
+def _sub(item):
+    """A row's second line, as MA's lists: the artists, a podcast's publisher, an audiobook's authors or an episode's date."""
+    released = getattr(getattr(item, "metadata", None), "release_date", None)
+    if getattr(item.media_type, "value", item.media_type) == "podcast_episode" and released:
+        return f"{released.day} {released:%b %Y}"
+    authors = " / ".join(getattr(a, "name", a) for a in getattr(item, "authors", None) or [])
+    return getattr(item, "artist_str", "") or authors or getattr(item, "publisher", "") or ""
 
-    go: [kind, name, uri] of the first artist and the album, for "View artist" and "View album".
+
+def _row(client, item):
+    """A browse row: {"uri", "type", "name", "sub", "image", "duration_ms", "disc", "favorite", "played", "go"}.
+
+    played: "done", "part" or "" for an episode or audiobook. go: [kind, name, uri] of the first
+    artist and the album, for "View artist" and "View album".
     """
     try:
         image = _image_url(client, item, 256) or ""
@@ -390,9 +401,10 @@ def _row(client, item):
     kind = getattr(item.media_type, "value", item.media_type)
     artist, album = (getattr(item, "artists", None) or [None])[0], getattr(item, "album", None)
     return {"uri": item.uri, "type": kind, "name": _track_title(item) if kind == "track" else item.name or "",
-            "sub": getattr(item, "artist_str", "") or "",
+            "sub": _sub(item),
             "image": image, "duration_ms": int((getattr(item, "duration", 0) or 0) * 1000),
             "disc": getattr(item, "disc_number", 0) or 0, "favorite": bool(getattr(item, "favorite", False)),
+            "played": "done" if getattr(item, "fully_played", None) else "part" if getattr(item, "resume_position_ms", None) else "",
             "go": [[k, x.name, x.uri] for k, x in (("artist", artist), ("album", album)) if x]}
 
 
@@ -450,13 +462,19 @@ async def _browse(client, player_id, kind, text, item_id=None):
         elif kind_of == "playlist":
             uri = item.uri
             sections = [["", await music.get_playlist_tracks(item.item_id, item.provider, limit=500)]]
+        elif kind_of == "podcast":    # as MA's podcast page
+            episodes = await music.get_podcast_episodes(item.item_id, item.provider)
+            sections = [["Episodes", sorted(episodes, key=lambda e: e.position, reverse=True)]]
+            opened["header"] = {"image": _image_url(client, item, 512), "artist": item.publisher or "",
+                                "artist_uri": "", "year": 0}
         else:
             return None
     else:
         title = "Favourites"
         sections = [(name, await get(favorite=True, limit=100)) for name, get in (
             ("Albums", music.get_library_albums), ("Playlists", music.get_library_playlists),
-            ("Artists", music.get_library_artists), ("Songs", music.get_library_tracks))]
+            ("Artists", music.get_library_artists), ("Songs", music.get_library_tracks),
+            ("Podcasts", music.get_library_podcasts), ("Audiobooks", music.get_library_audiobooks))]
     return {"title": title, "uri": uri, "now": now, **opened, "sections": [{"name": name, "rows": [_row(client, i) for i in items]}
                                          for name, items in sections if items]}
 

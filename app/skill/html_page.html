@@ -695,7 +695,7 @@ $('lyBody').onscroll = () => { if (Date.now() - lyr.touchedAt < 1000) lyr.touche
 // Browse & search MA's music ({browse: ...}, see ma_control.browse). Albums, playlists and artists open; songs play.
 // Like MA: search is a list; elsewhere albums and artists show as a cover grid, and an artist starts with 5 songs.
 const br = { cur: null, back: [], opening: false, kind: '' };
-const OPENS = ['artist', 'album', 'playlist'];
+const OPENS = ['artist', 'album', 'playlist', 'podcast'];
 function openBrowse() { openSheet('browse', 'Favourites', 'Loading…'); browse('favorites'); }
 // The cover opens the playing song's album, at the song.
 $('album').onclick = $('cover').onclick = () => { openSheet('browse', state.album, 'Loading…'); browse('playing'); };
@@ -726,7 +726,7 @@ function drawBrowse(top = 0) {
   if (r.header) body.appendChild(hero(r));
   r.sections.forEach(sec => {
     if (sec.name) lab(body, sec.name);
-    const grid = r.kind !== 'search' && sec.rows.every(it => it.type === 'album' || it.type === 'artist');
+    const grid = r.kind !== 'search' && sec.rows.every(it => ['album', 'artist', 'podcast', 'audiobook'].includes(it.type));
     const box = grid ? body.appendChild(document.createElement('div')) : body;
     if (grid) box.className = 'grid';
     const short = r.type === 'artist' && sec.name === 'Songs' && !sec.all && sec.rows.length > 6;
@@ -763,8 +763,10 @@ function hero(r) {
   h.querySelector('a').textContent = r.header.artist;
   if (!r.header.artist) h.querySelector('a').remove();
   if (r.header.artist_uri) h.querySelector('a').onclick = () => browse('open', r.header.artist_uri, true);
+  else if (r.header.artist) h.querySelector('a').style.color = 'inherit';   // a podcast's publisher opens nothing
   const ms = songs.reduce((sum, it) => sum + it.duration_ms, 0);
   h.querySelector('small').textContent = (artist ? [rows('Albums').length + ' albums', songs.length + ' songs']
+    : r.type === 'podcast' ? [songs.length + ' episodes']
     : [r.header.year || '', songs.length + ' songs', ms ? Math.round(ms / 60000) + ' min' : ''])
     .filter(Boolean).join(' · ');
   return h;
@@ -798,7 +800,9 @@ function browseItem(r, it, grid) {
     el.querySelector(grid ? '.art' : '.th').insertAdjacentHTML('beforeend', EQ);
   el.querySelector('.tx div').textContent = it.name;
   if (!grid) {
-    el.querySelector('.d').textContent = it.duration_ms && !opens ? time(it.duration_ms) : '';
+    // MA's played marks for episodes and audiobooks
+    el.querySelector('.d').textContent = ({ done: '✓ ', part: '◔ ' }[it.played] || '') + (it.duration_ms && !opens ? time(it.duration_ms) : '');
+    if (it.type === 'podcast_episode') el.querySelector('.heart').style.visibility = 'hidden';
     const playing = it.uri === (r.now || [])[0];
     el.classList.toggle('now', playing);
     heart(el.querySelector('.heart'), playing ? state.songFavorite === 1 : it.favorite,

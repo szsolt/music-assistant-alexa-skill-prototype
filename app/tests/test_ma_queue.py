@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from music_assistant_models.enums import MediaType, QueueOption, RepeatMode
@@ -36,6 +37,12 @@ for _album in ALBUMS:
     _album.artists, _album.year = [ARTIST], 2004
 for _song in SONGS:
     _song.artists, _song.album = [ARTIST], ALBUMS[0]
+PODCAST = SimpleNamespace(_media("podcast", 5, "Esti mese", artist="").__dict__ | {"publisher": "Kossuth Rádió"})
+EPISODES = [SimpleNamespace(_media("podcast_episode", 50 + n, f"Esti mese {n}", artist="", duration=900 + n).__dict__ | {
+    "position": n, "fully_played": n == 1, "resume_position_ms": 60000 if n == 2 else None,
+    "metadata": SimpleNamespace(release_date=datetime(2026, 10, 26 + n, tzinfo=timezone.utc))}) for n in (2, 1, 3)]
+AUDIOBOOK = SimpleNamespace(_media("audiobook", 6, "A Pál utcai fiúk", artist="").__dict__ | {
+    "publisher": "Móra", "authors": [SimpleNamespace(name="Molnár Ferenc")]})
 DELUXE = SONGS + [_media("track", 14, "Esti dal", duration=182, disc=2)]
 
 
@@ -86,16 +93,21 @@ class _Client:
         self.send_command = send_command
         async def search(text, media_types, limit=50):
             calls.append(("search", text, tuple(media_types), limit))
-            return SimpleNamespace(artists=[ARTIST], albums=ALBUMS, playlists=[PLAYLIST], tracks=SONGS)
+            return SimpleNamespace(artists=[ARTIST], albums=ALBUMS, playlists=[PLAYLIST], tracks=SONGS,
+                                   podcasts=[PODCAST], audiobooks=[AUDIOBOOK])
 
         async def get_item_by_uri(uri):
-            return {i.uri: i for i in [ARTIST, SPOTIFY_ARTIST, PLAYLIST] + ALBUMS}[uri]
+            return {i.uri: i for i in [ARTIST, SPOTIFY_ARTIST, PLAYLIST, PODCAST] + ALBUMS}[uri]
 
         async def get_library_item_by_prov_id(media_type, item_id, provider):
             return ARTIST if (item_id, provider) == ("kalaka", "spotify") else None
 
         async def get_item(media_type, item_id, provider):
-            return {(i.media_type, i.item_id): i for i in [ARTIST, PLAYLIST] + ALBUMS}[(media_type, item_id)]
+            return {(i.media_type, i.item_id): i for i in [ARTIST, PLAYLIST, PODCAST] + ALBUMS}[(media_type, item_id)]
+
+        async def get_podcast_episodes(item_id, provider):
+            calls.append(("episodes", item_id, provider))
+            return EPISODES
 
         async def add_item_to_favorites(uri):
             calls.append(("favorite", uri))
@@ -113,17 +125,17 @@ class _Client:
         async def listing(name, *args, **kwargs):
             calls.append((name,) + args + tuple(sorted(kwargs.items())))
             return {"artist_albums": ALBUMS, "library_albums": ALBUMS, "library_playlists": [],
-                    "library_artists": [ARTIST]}.get(name, SONGS)
+                    "library_artists": [ARTIST], "library_podcasts": [PODCAST], "library_audiobooks": []}.get(name, SONGS)
 
         self.music = SimpleNamespace(get_album_tracks=get_album_tracks, search=search, get_item_by_uri=get_item_by_uri,
                                      get_item=get_item, get_library_item_by_prov_id=get_library_item_by_prov_id,
                                      add_item_to_favorites=add_item_to_favorites,
                                      remove_item_from_favorites=remove_item_from_favorites,
-                                     create_playlist=create_playlist, add_playlist_tracks=add_playlist_tracks,
+                                     get_podcast_episodes=get_podcast_episodes, create_playlist=create_playlist, add_playlist_tracks=add_playlist_tracks,
                                      **{f"get_{name}": (lambda name: lambda *a, **k: listing(name, *a, **k))(name)
                                         for name in ("artist_tracks", "artist_albums", "playlist_tracks",
                                                      "library_albums", "library_playlists", "library_artists",
-                                                     "library_tracks")},
+                                                     "library_tracks", "library_podcasts", "library_audiobooks")},
                                      recently_played=lambda **k: listing("recently_played", **k))
         self.player_queues = SimpleNamespace(get_active_queue=get_active_queue, get_queue_items=get_queue_items,
                                              move_item=move_item, delete_item=delete_item, play_media=play_media)
@@ -271,16 +283,17 @@ def test_add_a_song_to_the_queue(monkeypatch):
         True, [("play_media", "office", "library://track/12", QueueOption.ADD)])
 
 
-def test_search_shows_artists_albums_playlists_and_songs(monkeypatch):
+def test_search_shows_artists_albums_playlists_songs_podcasts_and_audiobooks(monkeypatch):
     found, calls = _run(monkeypatch, ma_control._browse, "search", "esti dal")
-    assert calls == [("search", "esti dal", (MediaType.ARTIST, MediaType.ALBUM, MediaType.PLAYLIST, MediaType.TRACK), 10)]
+    assert calls == [("search", "esti dal", (MediaType.ARTIST, MediaType.ALBUM, MediaType.PLAYLIST, MediaType.TRACK,
+                                             MediaType.PODCAST, MediaType.AUDIOBOOK), 10)]
     assert found["title"] == "esti dal"
     assert [(s["name"], [r["name"] for r in s["rows"]]) for s in found["sections"]] == [
         ("Artists", ["Kaláka"]), ("Albums", ["Az én szívem", "Az én szívem (deluxe)"]), ("Playlists", ["Esti dal"]),
-        ("Songs", ["Esti dal", "Kicsi, gyere velem"])]
+        ("Songs", ["Esti dal", "Kicsi, gyere velem"]), ("Podcasts", ["Esti mese"]), ("Audiobooks", ["A Pál utcai fiúk"])]
     assert found["sections"][3]["rows"][0] == {"uri": "library://track/12", "type": "track", "name": "Esti dal",
                                                "sub": "Kaláka", "image": "http://ma/imageproxy/library://track/12?size=256", "duration_ms": 180000,
-                                               "disc": 1, "favorite": False,
+                                               "disc": 1, "favorite": False, "played": "",
                                                "go": [["artist", "Kaláka", "library://artist/3"],
                                                       ["album", "Az én szívem", "library://album/7"]]}
     assert found["sections"][1]["rows"][0]["go"] == [["artist", "Kaláka", "library://artist/3"]]
@@ -321,7 +334,7 @@ def test_what_plays_next(monkeypatch):
 
 def test_favourites_skip_empty_sections(monkeypatch):
     found, _ = _run(monkeypatch, ma_control._browse, "favorites", "")
-    assert [s["name"] for s in found["sections"]] == ["Albums", "Artists", "Songs"]
+    assert [s["name"] for s in found["sections"]] == ["Albums", "Artists", "Songs", "Podcasts"]
 
 
 def test_an_album_opens_with_its_discs_and_favourite(monkeypatch):
@@ -368,3 +381,19 @@ def test_save_the_queue_as_a_new_playlist(monkeypatch):
     assert name == "Esti mix"
     assert ("create_playlist", "Esti mix") in calls
     assert calls[-1] == ("add_tracks", "21", [f"library://track/{n + 1}" for n in range(len(TITLES))])
+
+
+def test_podcast_and_audiobook_rows_show_publisher_and_authors(monkeypatch):
+    found, _ = _run(monkeypatch, ma_control._browse, "search", "esti")
+    assert [s["rows"][0]["sub"] for s in found["sections"][-2:]] == ["Kossuth Rádió", "Molnár Ferenc"]
+
+
+def test_a_podcast_opens_with_its_episodes_newest_first(monkeypatch):
+    found, _ = _run(monkeypatch, ma_control._browse, "open", "library://podcast/5")
+    assert (found["type"], found["title"], found["uri"]) == ("podcast", "Esti mese", "")
+    assert found["header"] == {"image": "http://ma/imageproxy/library://podcast/5?size=512", "artist": "Kossuth Rádió",
+                               "artist_uri": "", "year": 0}
+    assert found["sections"][0]["name"] == "Episodes"
+    assert [(r["name"], r["sub"], r["duration_ms"], r["played"]) for r in found["sections"][0]["rows"]] == [
+        ("Esti mese 3", "29 Oct 2026", 903000, ""), ("Esti mese 2", "28 Oct 2026", 902000, "part"),
+        ("Esti mese 1", "27 Oct 2026", 901000, "done")]
