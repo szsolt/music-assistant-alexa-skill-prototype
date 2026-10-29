@@ -296,7 +296,10 @@ class HtmlPageRenewHandler(AbstractRequestHandler):
         device_id = _device_id_from(handler_input)
         message = getattr(handler_input.request_envelope.request, "message", None) or {}
         player_id = device_mapping.get_player_for_device(device_id)
-        if (not isinstance(message, dict) or message.get("renew") != bell.page_of(device_id)
+        # A restart forgets the open pages: then any page of this Echo may ask.
+        page_id = bell.page_of(device_id)
+        asking = message.get("renew") if isinstance(message, dict) else None
+        if (not asking or (page_id and asking != page_id)
                 or not player_id or ma_control.is_paused(player_id)):
             return handler_input.response_builder.response
         # As "Alexa, open music assistant": a new page, then MA's new stream for it.

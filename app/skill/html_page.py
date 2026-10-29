@@ -3,7 +3,9 @@
 
 The page gets its start state inline, then JSON messages over SSE:
 {"set": {field: value}, "src": new stream, "media": "play"|"pause", "ready": True},
-and {"queue": ...} for its playlist (ma_control.queue_window), {"wave": ...} for its loudness graph.
+and {"queue": ...} for its playlist (ma_control.queue_window), {"wave": ...} for its loudness graph,
+{"lyrics": ...}, {"options": ...} (sleep timer, Autoplay),
+{"browse": ...} (music to pick from), {"now": ...} (what plays, for its marks) and {"toast": text}.
 It sends its position every second and its buttons as actions.
 
 The skill's logic speaks APL (commands out, UserEvents in): this module is
@@ -26,7 +28,7 @@ from ask_sdk_model.interfaces.alexa.presentation.html import (
     StartDirective, StartRequest, StartRequestMethod, Configuration)
 from ask_sdk_core.serialize import DefaultSerializer
 
-from . import bell, device_mapping, ma_control
+from . import bell, device_mapping, ma_control, ma_voice
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +222,6 @@ def report(skill, page_id, seen, at, playing):
 _ACTIONS = {
     "next": lambda n, a: ["Next", n],
     "previous": lambda n, a: ["Previous", n],
-    "play_album": lambda n, a: ["PlayAlbum", n],
     "play": lambda n, a: ["Play", int(a["position"]), n],
     "pause": lambda n, a: ["Pause", int(a["position"]), n],
     "seek": lambda n, a: ["Seek", int(a["position"]), n],
@@ -240,8 +241,8 @@ def act(skill, page_id, action):
     """
     if not bell.device_of(page_id):
         return None
-    if isinstance(action, dict) and action.get("action") in _QUEUE_ACTIONS:
-        return _playlist(page_id, action)
+    if isinstance(action, dict) and action.get("action") in _MA_ACTIONS:
+        return _on_ma(page_id, action)
     with _lock:
         number = _presses.get(page_id, 0) + 1
     try:
@@ -254,26 +255,50 @@ def act(skill, page_id, action):
     return True
 
 
-# Playlist actions: run on MA directly, not as APL presses.
-_QUEUE_ACTIONS = ("queue", "move", "play_next", "move_end", "delete", "mix", "wave")
+# Playlist, lyrics, browse and player options: run on MA directly, not as APL presses.
+_MA_ACTIONS = ("queue", "move", "play_next", "move_end", "delete", "clear", "mix", "wave",
+               "lyrics", "options", "sleep", "autoplay", "crossfade", "play_media", "browse", "favorite", "now",
+               "players", "transfer")
+_BROWSE_KINDS = ("favorites", "recent", "search", "open", "playing")
+_PLAY_OPTIONS = {"replace": "", "next": "Playing next", "add": "Added to the queue"}
 
 
-def _playlist(page_id, action):
+def _on_ma(page_id, action):
     """{"action": "queue", "offset", "limit"}: send the page its playlist rows (-1: around the playing song).
 
-    "move" (item, shift), "play_next", "move_end", "delete" (item, ...): change
+    "move" (item, shift), "play_next", "move_end", "delete" (item, ...), "clear": change
     the queue first. MA's answer replaces what the page shows, also when MA
-    refuses. "mix" (item): MA plays an endless mix of the song, and the page
-    gets its stream as for any track change. "wave" (item, default the playing
-    song): send {"wave": {"item", "points"}}.
+    refuses. "mix" (item) and "play_media" (uri, option "replace", item: the
+    track to start at): MA replaces the queue, and the page gets its stream as
+    for any track change. "play_media" with option "next" or "add" sends
+    {"toast": text}. "browse" (kind: favorites|recent|search|open|playing, text: the
+    search, the uri to open or "artist" for playing, item: the page's song): send {"browse": ma_control.browse}. "now" (item):
+    send {"now": {"item", "uris": ma_control.now_playing}}. "favorite"
+    (uri, on): sends a toast only if MA refuses. "wave" and "lyrics" (item, default the playing song): send
+    {"wave": {"item", "points"}} or {"lyrics": {"item", "plain", "lrc"}}.
+    "options", "sleep" (minutes,
+    0: off), "autoplay" and "crossfade" (on): send {"options": ma_control.options}.
+    "players": send {"players": [[player_id, name]]}, the others the music can move to.
+    "transfer" (target, name): move the queue there, as the voice command; sends {"toast": text}.
     """
     kind = action["action"]
     try:
         offset, limit = int(action.get("offset", -1)), min(int(action.get("limit", 110)), 500)
-        item = str(action["item"]) if kind not in ("queue", "wave") else str(action.get("item") or "")
+        item = (str(action["item"]) if kind in ("move", "play_next", "move_end", "delete", "mix")
+                else str(action.get("item") or ""))
         shift = int(action["shift"]) if kind == "move" else 0
         if kind == "move" and not shift:
             raise ValueError("no shift")    # MA reads 0 as "play next"
+        minutes = int(action["minutes"]) if kind == "sleep" else 0
+        if not 0 <= minutes <= 720:
+            raise ValueError("bad minutes")
+        uri = str(action["uri"]) if kind in ("play_media", "favorite") else ""
+        option = str(action.get("option", "replace")) if kind == "play_media" else "replace"
+        browse = str(action.get("kind")) if kind == "browse" else "favorites"
+        text = str(action.get("text") or "")[:200]
+        target, name = (str(action["target"]), str(action.get("name") or "")[:100]) if kind == "transfer" else ("", "")
+        if option not in _PLAY_OPTIONS or browse not in _BROWSE_KINDS or (kind == "play_media" and not uri):
+            raise ValueError("bad option")
     except (KeyError, TypeError, ValueError):
         raise ValueError("bad action")
     player_id = device_mapping.get_player_for_device(bell.device_of(page_id))
@@ -281,8 +306,38 @@ def _playlist(page_id, action):
         return True
     if kind == "wave":
         update = {"wave": {"item": item, "points": ma_control.wave_form(player_id, item or None)}}
-    elif kind == "mix":
-        if ma_control.edit_queue(player_id, kind, item):
+    elif kind == "lyrics":
+        update = {"lyrics": {"item": item, **(ma_control.lyrics(player_id, item or None) or {"plain": "", "lrc": ""})}}
+    elif kind in ("options", "sleep", "autoplay", "crossfade"):
+        value = minutes if kind == "sleep" else bool(action.get("on"))
+        options = ma_control.options(player_id, None if kind == "options" else kind, value)
+        if not options:
+            return True
+        update = {"options": options}
+    elif kind in ("players", "transfer"):
+        try:
+            if kind == "players":
+                update = {"players": [[pid, pname] for pid, pname in ma_voice.players() if pid != player_id]}
+            else:
+                ma_voice.move(player_id, target)    # MA then pauses this Echo, which reaches the page
+                update = {"toast": "Moved to " + name}
+        except (ma_voice.MAUnavailable, ma_voice.MAFailed) as e:
+            logger.warning("Could not %s for player %s: %s", "list the players" if kind == "players" else "move the music", player_id, e)
+            update = {"toast": "Music Assistant did not do it"}
+    elif kind == "browse":
+        update = {"browse": ma_control.browse(player_id, browse, text, item or None) or {"title": "", "sections": []}}
+    elif kind == "now":
+        update = {"now": {"item": item, "uris": ma_control.now_playing(player_id, item or None) or []}}
+    elif kind == "favorite":
+        if ma_control.set_favorite(player_id, uri, bool(action.get("on"))):
+            return True
+        update = {"toast": "Music Assistant did not do it"}
+    elif kind == "play_media" and option != "replace":
+        done = ma_control.play_media(player_id, uri, option)
+        update = {"toast": _PLAY_OPTIONS[option] if done else "Music Assistant did not do it"}
+    elif kind in ("mix", "play_media"):
+        if (ma_control.edit_queue(player_id, kind, item) if kind == "mix"
+                else ma_control.play_media(player_id, uri, "replace", item or None)):
             return True
         update = {"ready": True}
     else:

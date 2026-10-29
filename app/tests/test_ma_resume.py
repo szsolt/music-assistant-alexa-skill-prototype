@@ -20,17 +20,10 @@ class _Client:
 
         self.player_queues = SimpleNamespace(get_active_queue=get_active_queue, play_index=play_index, seek=seek)
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc):
-        return False
-
 
 def _resume(monkeypatch, **kwargs):
     calls = []
-    monkeypatch.setattr(ma_control, "MusicAssistantClient", lambda *a, **k: _Client(calls))
-    used = asyncio.run(ma_control._resume_at("http://ma", "t", "Office", kwargs.get("position_ms"),
+    used = asyncio.run(ma_control._resume_at(_Client(calls), "Office", kwargs.get("position_ms"),
                                              kwargs.get("item_id")))
     return used, calls
 

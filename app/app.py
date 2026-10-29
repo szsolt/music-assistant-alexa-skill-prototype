@@ -304,12 +304,13 @@ except Exception:
 # Pause MA when a player page goes quiet (see skill/bell.py).
 bell.start_sweeping()
 
-# The pages' "Up next" follows MA's queue changes (see skill/ma_events.py).
+# The skill's one MA connection (see skill/ma_client.py); the pages' "Up next" follows its queue changes.
 try:
-    from skill import ma_events
+    from skill import ma_client, ma_events
     ma_events.start()
+    ma_client.start()
 except Exception:
-    app.logger.exception("Could not start listening to MA's queue changes")
+    app.logger.exception("Could not start the connection to MA")
 
 
 def _setup_reader_thread(proc, prefix=None):

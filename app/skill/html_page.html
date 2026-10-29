@@ -4,7 +4,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="https://cdn.html.games.alexa.a2z.com/alexa-html/latest/alexa-html.js"></script>
 <style>
-:root { --u: min(100vw / 1280, 100vh / 800); --accent: #18BCF2; }
+:root { --u: min(100vw / 1280, 100vh / 800); --accent: #03a9f4; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; position: relative; background: #000; color: #fff;
   font-family: "Amazon Ember", "Bookerly", sans-serif; user-select: none; }
@@ -40,27 +40,27 @@ html, body { margin: 0; height: 100%; overflow: hidden; position: relative; back
 #bar::after { content: ""; display: block; width: 30%; height: 100%; background: var(--accent); animation: sweep 1.6s linear infinite; }
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
 #quality { text-align: center; font-size: calc(16 * var(--u)); opacity: .5; min-height: 1em; }
-#buttons { display: flex; justify-content: center; align-items: center; gap: calc(28 * var(--u)); margin-top: calc(6 * var(--u)); }
+#buttons { display: flex; justify-content: center; align-items: center; gap: calc(20 * var(--u)); margin-top: calc(6 * var(--u)); }
 #buttons button { width: calc(92 * var(--u)); height: calc(92 * var(--u)); border: 0; border-radius: 50%; background: none; padding: calc(14 * var(--u)); }
 #buttons button:active { background: rgba(255,255,255,.15); }
 #buttons svg { width: 100%; height: 100%; fill: #fff; }
-#PlayPause svg { fill: var(--accent); }
+#buttons #PlayPause { background: #fff; padding: calc(20 * var(--u)); transition: transform .1s; }
+#buttons #PlayPause:active { background: #fff; transform: scale(.92); }
+#PlayPause svg { fill: #212121; }
 #buttons .on path:last-child { fill: var(--accent); stroke: var(--accent); }
 .hidden { visibility: hidden; }
 #busy { position: absolute; inset: 0; z-index: 3; background: rgba(0,0,0,.65); display: none; align-items: center; justify-content: center; gap: calc(16 * var(--u)); }
 #busy i { width: calc(20 * var(--u)); height: calc(20 * var(--u)); border-radius: 50%; background: #fff; animation: dot 1.2s infinite; }
 #busy i:nth-child(2) { animation-delay: .2s; } #busy i:nth-child(3) { animation-delay: .4s; }
 @keyframes dot { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
-#pl { position: absolute; inset: 0; z-index: 2; background: rgba(8,10,12,.97); display: none; flex-direction: column; padding: calc(24 * var(--u)) calc(48 * var(--u)); }
-#pl h4 { margin: 0 0 calc(12 * var(--u)); font-size: calc(30 * var(--u)); font-weight: 500; display: flex; justify-content: space-between; }
-#plClose { padding: 0 calc(16 * var(--u)); }
+#pl, #sheet { position: absolute; inset: 0; z-index: 2; background: #181818; display: none; flex-direction: column; padding: calc(24 * var(--u)) calc(48 * var(--u)); }
+#pl h4, #sheet h4 { margin: 0 0 calc(12 * var(--u)); font-size: calc(30 * var(--u)); font-weight: 500; display: flex; justify-content: space-between; }
+#plClose, #sheetClose { padding: 0 calc(16 * var(--u)); }
 #plBox { flex: 1; min-height: 0; display: flex; gap: calc(12 * var(--u)); }
 #plList { flex: 1; overflow-y: auto; position: relative; }
-#plBar { width: calc(6 * var(--u)); border-radius: calc(3 * var(--u)); background: rgba(255,255,255,.12); position: relative; }
-#plBar i { position: absolute; left: 0; right: 0; border-radius: inherit; background: rgba(255,255,255,.5); }
 .pr { display: flex; align-items: center; gap: calc(20 * var(--u)); height: calc(96 * var(--u)); padding-left: calc(12 * var(--u));
-  border-bottom: 1px solid rgba(255,255,255,.08); background: #080a0c; position: relative; transition: transform .15s; }
-.pr img { width: calc(68 * var(--u)); height: calc(68 * var(--u)); object-fit: cover; border-radius: calc(4 * var(--u)); flex: none; background: #22313b; }
+  border-bottom: 1px solid rgba(255,255,255,.08); background: #181818; position: relative; transition: transform .15s; }
+.pr img { width: calc(68 * var(--u)); height: calc(68 * var(--u)); object-fit: cover; border-radius: calc(4 * var(--u)); flex: none; background: #232323; }
 /* MA's now-playing bars over the cover; they stop while paused */
 .th { position: relative; flex: none; display: flex; }
 .eq { position: absolute; inset: 0; display: flex; gap: calc(4 * var(--u)); align-items: center; justify-content: center;
@@ -68,7 +68,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; position: relative; back
 .eq i { width: calc(6 * var(--u)); height: calc(30 * var(--u)); background: var(--accent); transform: scaleY(.25);
   animation: eq 1s infinite ease-in-out; }
 .eq i:nth-child(2) { animation-delay: .2s; } .eq i:nth-child(3) { animation-delay: .4s; } .eq i:nth-child(4) { animation-delay: .6s; }
-#pl.paused .eq i { animation-play-state: paused; }
+#pl.paused .eq i, #sheet.paused .eq i { animation-play-state: paused; }
 .eq.live i { animation: none; transition: transform .1s linear; }
 @keyframes eq { 0%, 100% { transform: scaleY(.25); } 50% { transform: scaleY(1); } }
 .pr .tx { flex: 1; min-width: 0; font-size: calc(30 * var(--u)); }
@@ -77,17 +77,81 @@ html, body { margin: 0; height: 100%; overflow: hidden; position: relative; back
 .pr .d { font-size: calc(22 * var(--u)); opacity: .6; }
 .pr b { width: calc(96 * var(--u)); height: 100%; display: flex; align-items: center; justify-content: center; flex: none;
   font-size: calc(40 * var(--u)); font-weight: normal; opacity: .6; touch-action: none; }
-.pr.past { opacity: .4; } .pr.now { background: #0e2a35; border-left: calc(6 * var(--u)) solid var(--accent); }
+.pr.past { opacity: .4; } .pr.now { background: rgba(3,169,244,.15); border-left: calc(6 * var(--u)) solid var(--accent); }
 .lab { font-size: calc(20 * var(--u)); letter-spacing: .08em; text-transform: uppercase; opacity: .6;
   padding: calc(18 * var(--u)) calc(12 * var(--u)) calc(8 * var(--u)); border-bottom: 1px solid rgba(255,255,255,.08); }
 .pr .more { width: calc(64 * var(--u)); height: 100%; display: flex; align-items: center; justify-content: center; flex: none;
   font-size: calc(40 * var(--u)); font-style: normal; opacity: .6; }
-#plShade { position: absolute; inset: 0; display: none; }
-#plMenu { position: absolute; right: calc(150 * var(--u)); display: none; background: #22313b; border-radius: calc(12 * var(--u));
+#shade { position: absolute; inset: 0; z-index: 4; display: none; }
+#menu { position: absolute; z-index: 4; display: none; background: #232323; border-radius: calc(12 * var(--u));
   box-shadow: 0 8px 24px rgba(0,0,0,.9); padding: calc(8 * var(--u)) 0; min-width: calc(320 * var(--u)); }
-#plMenu div { font-size: calc(30 * var(--u)); padding: calc(18 * var(--u)) calc(32 * var(--u)); display: flex; align-items: center; gap: calc(24 * var(--u)); }
-#plMenu svg { width: calc(36 * var(--u)); height: calc(36 * var(--u)); fill: #fff; flex: none; }
-.pr.drag { transition: none; z-index: 2; box-shadow: 0 8px 24px rgba(0,0,0,.9); background: #22313b; }
+#menu div { font-size: calc(30 * var(--u)); padding: calc(18 * var(--u)) calc(32 * var(--u)); display: flex; align-items: center; gap: calc(24 * var(--u)); }
+#menu { max-width: 70vw; } #menu span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#menu svg { width: calc(36 * var(--u)); height: calc(36 * var(--u)); fill: #fff; flex: none; }
+#sheetHead { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sheetBody { flex: 1; min-height: 0; overflow-y: auto; scroll-behavior: smooth; }
+/* every list shows where it is, as touch screens hide the scroll bar */
+#plList::-webkit-scrollbar, #sheetBody::-webkit-scrollbar, #lyBody::-webkit-scrollbar { width: calc(8 * var(--u)); }
+#plList::-webkit-scrollbar-thumb, #sheetBody::-webkit-scrollbar-thumb, #lyBody::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,.35); border-radius: calc(4 * var(--u)); }
+#sheetBody .note { font-size: calc(30 * var(--u)); opacity: .6; padding: calc(24 * var(--u)) calc(12 * var(--u)); }
+#lyNote { font-size: calc(20 * var(--u)); color: var(--accent); margin-top: calc(6 * var(--u)); }
+#lyrics { display: none; flex: 1; min-height: 0; flex-direction: column; padding-top: calc(12 * var(--u)); padding-bottom: calc(12 * var(--u)); }
+#right.ly #lyrics { display: flex; } #right.ly #info, #right.ly #upnext { display: none; }
+#lyTitle { font-size: calc(22 * var(--u)); opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#lyBody { flex: 1; min-height: 0; overflow-y: auto; position: relative; scroll-behavior: smooth;
+  -webkit-mask-image: linear-gradient(transparent, #000 12%, #000 88%, transparent); }
+#lyBody::before, #lyBody::after { content: ""; display: block; height: 40%; }
+.ly { font-size: calc(34 * var(--u)); line-height: 1.3; padding: calc(6 * var(--u)) 0; opacity: .45; transition: opacity .3s; }
+.ly.on { opacity: 1; color: var(--accent); } #lyBody.plain .ly { opacity: .9; font-size: calc(28 * var(--u)); }
+#album, #artist { cursor: pointer; }
+#sheetHead { flex: 1; }
+#sheetFav { display: none; padding: 0 calc(24 * var(--u)); } #sheetFav svg { width: calc(40 * var(--u)); height: calc(40 * var(--u)); display: block; }
+.heart path { fill: none; stroke: #fff; stroke-width: 2; } .heart.on path { fill: var(--accent); stroke: var(--accent); }
+.pr .heart { width: calc(64 * var(--u)); height: 100%; flex: none; display: flex; align-items: center; justify-content: center; }
+.pr .heart svg { width: calc(34 * var(--u)); height: calc(34 * var(--u)); } #sheetBack { display: none; padding: 0 calc(24 * var(--u)) 0 0; }
+#bBar { display: none; gap: calc(16 * var(--u)); margin-bottom: calc(12 * var(--u)); align-items: center; }
+#sheet.browse #bBar { display: flex; }
+#q { flex: 1; min-width: 0; font: inherit; font-size: calc(30 * var(--u)); color: #fff; background: #232323; border: none;
+  border-radius: calc(12 * var(--u)); padding: calc(14 * var(--u)) calc(20 * var(--u)); }
+#plOpts { display: flex; gap: calc(12 * var(--u)); margin: 0 0 calc(12 * var(--u)); }
+#plOpts span { gap: calc(10 * var(--u)); }
+#plOpts svg.rings { fill: none; stroke: #fff; stroke-width: 2; }
+#bBar span, #plOpts span { font-size: calc(26 * var(--u)); padding: calc(14 * var(--u)) calc(22 * var(--u)); border-radius: calc(40 * var(--u));
+  border: 1px solid rgba(255,255,255,.25); white-space: nowrap; display: flex; align-items: center; }
+#bBar span.on, #plOpts span.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+#bBar svg, #plOpts svg { width: calc(36 * var(--u)); height: calc(36 * var(--u)); fill: #fff; }
+.grid { display: grid; grid-template-columns: repeat(4, 1fr); padding: calc(8 * var(--u)) 0; }
+.cell { min-width: 0; margin: calc(8 * var(--u)); padding: calc(8 * var(--u)); border-radius: calc(8 * var(--u)); transition: background .15s, transform .15s; }
+.cell:active { background: rgba(255,255,255,.08); transform: scale(.97); }
+.cell .art, .hero .art { aspect-ratio: 1; border-radius: calc(8 * var(--u)); overflow: hidden; background: linear-gradient(90deg, #55e1ff, #1cbff3);
+  box-shadow: 0 2px 8px rgba(0,0,0,.25), inset 0 0 0 1px rgba(255,255,255,.04); display: flex; align-items: center; justify-content: center;
+  font-size: calc(80 * var(--u)); font-weight: 700; letter-spacing: .02em; color: rgba(255,255,255,.92); text-shadow: 0 2px 8px rgba(0,0,0,.25); }
+.cell .art { position: relative; }
+.cell .eq { gap: calc(8 * var(--u)); } .cell .eq i { width: calc(14 * var(--u)); height: calc(80 * var(--u)); }
+.cell img, .hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hero { display: flex; gap: calc(32 * var(--u)); align-items: flex-end; margin: calc(8 * var(--u)) 0 calc(24 * var(--u)); }
+.hero .art { width: calc(220 * var(--u)); flex: none; font-size: calc(70 * var(--u)); }
+.hero.artist .art { border-radius: 50%; }
+.hero b { display: block; font-size: calc(40 * var(--u)); font-weight: 700; }
+.hero a { display: inline-block; color: var(--accent); font-size: calc(30 * var(--u)); padding: calc(10 * var(--u)) 0; }
+.hero .acts { display: flex; margin-top: calc(8 * var(--u)); }
+.hero .heart, .hero .more { display: flex; align-items: center; justify-content: center; width: calc(64 * var(--u)); height: calc(64 * var(--u)); }
+.hero .more, #sheetMore { font-size: calc(40 * var(--u)); font-style: normal; opacity: .8; }
+#sheetMore { display: none; padding: 0 calc(16 * var(--u)); }
+.hero .heart svg { width: calc(40 * var(--u)); height: calc(40 * var(--u)); }
+.hero small { display: block; font-size: calc(22 * var(--u)); opacity: .6; }
+.cell .meta { display: flex; align-items: center; margin-top: calc(10 * var(--u)); }
+.cell .tx { flex: 1; min-width: 0; }
+.cell .tx div, .cell small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cell .tx div { font-size: calc(26 * var(--u)); font-weight: 600; }
+.cell small { display: block; font-size: calc(22 * var(--u)); opacity: .6; margin-top: calc(2 * var(--u)); }
+.cell .more { width: calc(64 * var(--u)); height: calc(64 * var(--u)); flex: none; display: flex; align-items: center; justify-content: center; font-size: calc(34 * var(--u)); font-style: normal; opacity: .7; }
+.pr.all { justify-content: center; color: var(--accent); font-size: calc(26 * var(--u)); }
+#toast { position: absolute; left: 50%; bottom: calc(40 * var(--u)); transform: translateX(-50%); z-index: 5; display: none;
+  background: #232323; border-radius: calc(12 * var(--u)); padding: calc(18 * var(--u)) calc(32 * var(--u));
+  font-size: calc(28 * var(--u)); box-shadow: 0 8px 24px rgba(0,0,0,.9); }
+.pr.drag { transition: none; z-index: 2; box-shadow: 0 8px 24px rgba(0,0,0,.9); background: #232323; }
 </style></head><body>
 <div id="bg"></div>
 <div id="clock"></div>
@@ -96,7 +160,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; position: relative; back
   <div id="track">
     <img id="cover" alt="">
     <div id="right">
-      <div class="panel"><div id="title"></div><div id="artist"></div><div id="album"></div></div>
+      <div id="info" class="panel"><div id="title"></div><div id="artist"></div><div id="album"></div><div id="lyNote"></div></div>
+      <div id="lyrics" class="panel"><div id="lyTitle"></div><div id="lyBody"></div></div>
       <div id="upnext" class="hidden"><img id="nextImage" alt=""><div>
         <div id="nextLabel">Up next</div><div id="nextTitle"></div><div id="nextArtist"></div></div></div>
     </div>
@@ -107,6 +172,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; position: relative; back
       <span id="total">0:00</span></div>
     <div id="quality"></div>
     <div id="buttons">
+      <button id="More"><svg viewBox="0 0 24 24"><path d="M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg></button>
       <button id="FavAlbum"><svg viewBox="0 0 24 24"><path d="M5.5 5.5h13v13H5.5z" fill="none" stroke="#fff" stroke-width="1.5"/>
         <path transform="translate(7.8,7.6) scale(.35)" fill="none" stroke="#fff" stroke-width="4.5" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></button>
       <button id="Shuffle"><svg viewBox="0 0 24 24"><path transform="translate(3,3) scale(.75)" d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg></button>
@@ -119,7 +185,13 @@ html, body { margin: 0; height: 100%; overflow: hidden; position: relative; back
     </div>
   </div>
 </div>
-<div id="pl"><h4><span id="plHead"></span><span id="plClose">✕</span></h4><div id="plBox"><div id="plList"></div><div id="plBar"><i></i></div></div><div id="plShade"></div><div id="plMenu"></div></div>
+<div id="pl"><h4><span id="plHead"></span><span id="plClose">✕</span></h4>
+<div id="plOpts"><span id="plAuto">Autoplay</span><span id="plFade"><svg class="rings" viewBox="0 0 24 24"><circle cx="9" cy="9" r="7"/><circle cx="15" cy="15" r="7"/></svg>Crossfade</span><span id="plClear">Clear</span><span id="plMove">Move to…</span></div><div id="plBox"><div id="plList"></div></div></div>
+<div id="sheet"><h4><span id="sheetBack">‹</span><span id="sheetHead"></span><span id="sheetFav" class="heart"><svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></span><span id="sheetMore" class="more">⋮</span><span id="sheetClose">✕</span></h4>
+<div id="bBar"><input id="q" type="search" enterkeyhint="search" placeholder="Search"><span id="bGo"><svg viewBox="0 0 24 24"><path id="bGoIcon"/></svg></span>
+<span id="bFav">Favourites</span><span id="bRecent">Recent</span></div><div id="sheetBody"></div></div>
+<div id="toast"></div>
+<div id="shade"></div><div id="menu"></div>
 <div id="busy"><i></i><i></i><i></i></div>
 <audio id="audio" preload="auto"></audio>
 <script>
@@ -157,6 +229,19 @@ Object.assign(ICONS, {   // Material icons: playlist_play, all_inclusive, vertic
   toEnd: 'M16 13h-3V3h-2v10H8l4 4 4-4zM4 19v2h16v-2H4z',
   delete: 'M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
 });
+Object.assign(ICONS, {   // Material icons: search, playlist_add
+  search: 'M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z',
+  add: 'M14 10H2v2h12v-2zm0-4H2v2h12V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM2 16h8v-2H2v2z',
+});
+Object.assign(ICONS, {   // Material icons: subject, bedtime, autorenew, speaker, close
+  artist: 'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
+  album: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z',
+  lyrics: 'M14 17H4v2h10v-2zm6-8H4v2h16V9zM4 15h16v-2H4v2zM4 5v2h16V5H4z',
+  sleep: 'M12.34 2.02C6.59 1.82 2 6.42 2 12c0 5.52 4.48 10 10 10 3.71 0 6.93-2.02 8.66-5.02-7.51-.25-12.09-8.43-8.32-14.96z',
+  autoplay: 'M12 6v3l4-4-4-4v3c-4.42 0-8 3.58-8 8 0 1.57.46 3.03 1.24 4.26L6.7 14.8c-.45-.83-.7-1.79-.7-2.8 0-3.31 2.69-6 6-6zm6.76 1.74L17.3 9.2c.44.84.7 1.79.7 2.8 0 3.31-2.69 6-6 6v-3l-4 4 4 4v-3c4.42 0 8-3.58 8-8 0-1.57-.46-3.03-1.24-4.26z',
+  speaker: 'M17 2H7c-1.1 0-2 .9-2 2v16c0 1.1.9 1.99 2 1.99L17 22c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-5 2c1.1 0 2 .9 2 2s-.9 2-2 2c-1.11 0-2-.9-2-2s.89-2 2-2zm0 16c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z',
+  off: 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
+});
 
 // Times are in ms. trackOffset is where the current track starts in the
 // stream: MA plays the whole queue as one stream. -1 hides a button.
@@ -180,6 +265,7 @@ function setImage(img, src) { if (src && img.getAttribute('src') !== src) img.sr
 function render() {
   $('title').textContent = state.title; $('title').className = state.titleSize ? 's' + state.titleSize : '';
   $('artist').textContent = state.artist; $('album').textContent = state.album;
+  $('lyTitle').textContent = state.artist ? state.title + ' · ' + state.artist : state.title;
   setImage($('cover'), state.cover);
   $('bg').style.backgroundImage = state.background ? `url("${state.background}")` : '';
   $('quality').textContent = state.quality;
@@ -197,7 +283,7 @@ function render() {
   }
   $('repeatIcon').setAttribute('d', state.repeat === 2 ? ICONS.repeatOne : ICONS.repeat);
   $('playIcon').setAttribute('d', audio.paused ? ICONS.play : ICONS.pause);
-  $('pl').classList.toggle('paused', audio.paused);
+  $('pl').classList.toggle('paused', audio.paused); $('sheet').classList.toggle('paused', audio.paused);
   drawWave();
 }
 
@@ -206,6 +292,8 @@ const wave = { item: null, points: null, bars: null };
 function askWave(item) {
   Object.assign(wave, { item: item || '', points: null, bars: null });
   post('action', { action: 'wave', item: item || '' });
+  if (lyr.on) askLyrics();
+  if (sheet.kind === 'browse') post('action', { action: 'now', item: item || '' });
 }
 function drawWave() {
   const c = $('wave'), bars = wave.bars, W = c.clientWidth, H = c.clientHeight;
@@ -216,20 +304,21 @@ function drawWave() {
   g.clearRect(0, 0, W, H);
   bars.forEach((v, n) => {
     const h = Math.max(2, v * H);
-    g.fillStyle = n / bars.length < done ? '#18BCF2' : 'rgba(255,255,255,.35)';
+    g.fillStyle = n / bars.length < done ? '#03a9f4' : 'rgba(255,255,255,.35)';
     g.fillRect(n * step, (H - h) / 2, Math.max(1, step * .6), h);
   });
 }
 
-// As MA's queue: the playing row's 4 bars show the loudness around the play position, 10 times a second.
+// MA's now-playing bars, for any cover; the loop below moves them all.
+const EQ = '<span class="eq"><i></i><i></i><i></i><i></i></span>';
+// As MA's queue: the now-playing bars (playlist and browse) show the loudness around the play position, 10 times a second.
 setInterval(() => {
-  const eq = pl.open && $('plList').querySelector('.now .eq'), p = wave.points;
-  if (!eq) return;
-  eq.classList.toggle('live', !!p);
-  if (!p || audio.paused || !state.trackDuration) return;
+  const eqs = document.querySelectorAll('#plList .now .eq, #sheetBody .eq'), p = wave.points;
+  eqs.forEach(eq => eq.classList.toggle('live', !!p));
+  if (!eqs.length || !p || audio.paused || !state.trackDuration) return;
   const at = Math.floor(Math.min(1, trackPosition() / state.trackDuration) * (p.length - 1));
-  eq.querySelectorAll('i').forEach((bar, k) =>
-    bar.style.transform = 'scaleY(' + Math.max(.25, p[Math.max(0, Math.min(p.length - 1, at - 2 + k))]) + ')');
+  eqs.forEach(eq => eq.querySelectorAll('i').forEach((bar, k) =>
+    bar.style.transform = 'scaleY(' + Math.max(.25, p[Math.max(0, Math.min(p.length - 1, at - 2 + k))]) + ')'));
 }, 100);
 
 function busy(on) { $('busy').style.display = on ? 'flex' : 'none'; }
@@ -247,14 +336,30 @@ events.onmessage = e => {
     wave.points = p;
     wave.bars = Array.from({ length: 200 }, (_, n) => Math.max(0, ...p.slice(Math.floor(n * size), Math.floor((n + 1) * size))));
   }
+  if (msg.lyrics && lyr.on && msg.lyrics.item === lyr.item) showLyrics(msg.lyrics);
+  if (msg.browse && sheet.kind === 'browse') showBrowse(msg.browse);
+  if (msg.now && msg.now.item === wave.item && br.cur) {   // a new song: move the now-playing marks
+    [br.cur, ...br.back].forEach(v => v.now = msg.now.uris);
+    if (sheet.kind === 'browse') drawBrowse($('sheetBody').scrollTop);
+  }
+  if (msg.toast) toast(msg.toast);
+  if (msg.options) {
+    Object.assign(opts, { until: Date.now() + msg.options.sleep_left * 1000, autoplay: msg.options.autoplay, crossfade: msg.options.crossfade });
+    drawOpts();
+    if (menu.redraw && $('menu').style.display === 'block') menu.redraw();
+  }
   if (msg.media === 'play') play(); else if (msg.media === 'pause') audio.pause();
-  if (msg.queue) { pl.win = msg.queue; pl.offset = msg.queue.offset; if (pl.open && !pl.dragging) drawList(); }
+  if (msg.players) showMenu(msg.players.map(([target, name]) => [name, ICONS.speaker, true,
+    () => post('action', { action: 'transfer', target, name })]), $('plMove'));
+  if (msg.queue) { pl.win = msg.queue; pl.offset = msg.queue.offset; drawOpts(); if (pl.open && !pl.dragging) drawList(); }
   else if (pl.open) { clearTimeout(pl.timer); pl.timer = setTimeout(askQueue, 1000); }
   render();
 };
 
 // Where the page is, every second: the skill sends what it hasn't seen.
-const report = () => post('state', { seen: state.seen, at: position(), playing: !audio.paused });
+// A 404: the skill restarted and forgot this page, so ask for a new one.
+const report = () => post('state', { seen: state.seen, at: position(), playing: !audio.paused })
+  .then(r => { if (r && r.status === 404) renew(); });
 setInterval(report, 1000);
 
 audio.addEventListener('timeupdate', () => {
@@ -287,6 +392,7 @@ setInterval(() => {
   renewWhenDue();
   if (pl.open && !pl.dragging && Date.now() > pl.closeAt) closeList();
   if (pl.open) plTick();
+  lyricsTick();
   const near = state.trackDuration > 0 && state.trackOffset + state.trackDuration - position() <= 20000;
   $('upnext').style.opacity = near ? 1 : .8;
   const d = new Date(); $('clock').textContent = d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
@@ -294,7 +400,6 @@ setInterval(() => {
 
 // Buttons that wait for MA's new stream pause the page meanwhile.
 function waitFor(action) { audio.pause(); busy(true); post('action', action); }
-$('cover').onclick = () => waitFor({ action: 'play_album' });
 $('Previous').onclick = () => waitFor({ action: 'previous' });
 $('Next').onclick = () => waitFor({ action: 'next' });
 $('PlayPause').onclick = () => {
@@ -326,8 +431,21 @@ function askQueue() {
 function openList() {
   Object.assign(pl, { open: true, offset: -1, limit: 110, scroll: true, drawnOffset: null });
   $('plList').textContent = ''; $('plHead').textContent = '';
-  $('pl').style.display = 'flex'; touched(); askQueue();
+  $('pl').style.display = 'flex'; drawOpts(); touched(); askQueue(); post('action', { action: 'options' });
 }
+// The chips over the playlist, as in MA's queue view.
+function drawOpts() {
+  $('plAuto').className = opts.autoplay ? 'on' : '';
+  $('plFade').className = opts.crossfade ? 'on' : '';
+  $('plClear').style.display = $('plMove').style.display = pl.win && pl.win.total ? '' : 'none';
+}
+[['plAuto', ICONS.autoplay], ['plClear', ICONS.delete], ['plMove', ICONS.speaker]].forEach(([id, d]) =>
+  $(id).insertAdjacentHTML('afterbegin', '<svg viewBox="0 0 24 24"><path d="' + d + '"/></svg>'));
+$('plAuto').onclick = () => post('action', { action: 'autoplay', on: !opts.autoplay });
+$('plFade').onclick = () => post('action', { action: 'crossfade', on: !opts.crossfade });
+$('plClear').onclick = () => showMenu([['Clear the queue', ICONS.delete, true,
+  () => post('action', { action: 'clear', offset: -1, limit: pl.limit })]], $('plClear'));
+$('plMove').onclick = () => post('action', { action: 'players' });
 function closeList() { pl.open = false; closeMenu(); $('pl').style.display = 'none'; }
 function plTick() {
   const w = pl.win; if (!w) return;
@@ -353,7 +471,7 @@ function drawList() {
                 : i === w.offset && i < w.index ? 'Played' : '';
     if (label) { const l = document.createElement('div'); l.className = 'lab'; l.textContent = label; list.appendChild(l); }
     r.className = 'pr' + (i < w.index ? ' past' : i === w.index ? ' now' : '');
-    r.innerHTML = '<span class="th"><img loading="lazy" alt="">' + (i === w.index ? '<span class="eq"><i></i><i></i><i></i><i></i></span>' : '') + '</span><div class="tx"><div></div><small></small></div><span class="d"></span><i class="more">⋮</i><b>☰</b>';
+    r.innerHTML = '<span class="th"><img loading="lazy" alt="">' + (i === w.index ? EQ : '') + '</span><div class="tx"><div></div><small></small></div><span class="d"></span><i class="more">⋮</i><b>☰</b>';
     if (it.image) r.querySelector('img').src = it.image;
     r.querySelector('.tx div').textContent = it.title;
     r.querySelector('small').textContent = [it.secondary, it.album].filter(Boolean).join(' · ');
@@ -370,19 +488,25 @@ function drawList() {
   if (pl.scroll && first) list.scrollTop = first.offsetTop;
   else if (anchor && rows[anchor.i - w.offset]) list.scrollTop = rows[anchor.i - w.offset].offsetTop + anchor.dy;
   pl.scroll = false; pl.drawnOffset = w.offset;
-  plTick(); plBar();
+  plTick();
 }
 // As in MA's queue: what a song's ⋮ offers. MA can't change played or loaded songs.
 function openMenu(it, i, row) {
   touched();
-  const w = pl.win, free = i > w.locked, m = $('plMenu');
+  const w = pl.win, free = i > w.locked;
   const edit = action => post('action', { action, item: it.item_id, offset: pl.offset, limit: pl.limit });
+  showMenu([['Play now', ICONS.play, i !== w.index, () => pick(it, i)],
+            ['Play next', ICONS.playNext, free && i !== w.locked + 1, () => edit('play_next')],
+            ['Endless mix', ICONS.mix, true, () => { closeList(); waitFor({ action: 'mix', item: it.item_id }); }],
+            ['Move to end', ICONS.toEnd, free && i < w.total - 1, () => edit('move_end')],
+            ['Delete', ICONS.delete, free, () => edit('delete')]], row.querySelector('.more'));
+}
+// A menu of [label, icon, shown, run] under (or, without room, above) the element it opens from.
+const menu = { from: null, redraw: null };
+function showMenu(entries, from, redraw) {
+  const m = $('menu');
   m.textContent = '';
-  [['Play now', ICONS.play, i !== w.index, () => pick(it, i)],
-   ['Play next', ICONS.playNext, free && i !== w.locked + 1, () => edit('play_next')],
-   ['Endless mix', ICONS.mix, true, () => { closeList(); waitFor({ action: 'mix', item: it.item_id }); }],
-   ['Move to end', ICONS.toEnd, free && i < w.total - 1, () => edit('move_end')],
-   ['Delete', ICONS.delete, free, () => edit('delete')]].forEach(([label, icon, on, run]) => {
+  entries.forEach(([label, icon, on, run]) => {
     if (!on) return;
     const entry = document.createElement('div');
     entry.innerHTML = '<svg viewBox="0 0 24 24"><path d="' + icon + '"/></svg><span></span>';
@@ -390,12 +514,14 @@ function openMenu(it, i, row) {
     entry.onclick = () => { closeMenu(); run(); };
     m.appendChild(entry);
   });
-  m.style.display = 'block'; $('plShade').style.display = 'block';
-  const box = $('pl').getBoundingClientRect(), r = row.getBoundingClientRect();
-  m.style.top = Math.max(8, Math.min(r.bottom - box.top, box.height - m.offsetHeight - 8)) + 'px';
+  Object.assign(menu, { from, redraw });
+  m.style.display = 'block'; $('shade').style.display = 'block';
+  const r = from.getBoundingClientRect(), H = window.innerHeight;
+  m.style.left = Math.max(8, Math.min(r.right, window.innerWidth - 8) - m.offsetWidth) + 'px';
+  m.style.top = (r.bottom + m.offsetHeight + 8 <= H ? r.bottom : Math.max(8, r.top - m.offsetHeight)) + 'px';
 }
-function closeMenu() { $('plMenu').style.display = $('plShade').style.display = 'none'; }
-$('plShade').onclick = closeMenu;
+function closeMenu() { menu.redraw = null; $('menu').style.display = $('shade').style.display = 'none'; }
+$('shade').onclick = closeMenu;
 function pick(it, i) {
   closeList();
   if (i !== pl.win.index) waitFor({ action: 'jump', item: it.item_id });
@@ -435,7 +561,7 @@ function drag(e, row, from) {
 // A touch that scrolls the list, or stops it scrolling, is not a tap on a song.
 $('plList').onpointerdown = () => { pl.tap = Date.now() - pl.scrolledAt > 300; };
 $('plList').onscroll = () => {
-  touched(); pl.scrolledAt = Date.now(); pl.tap = false; plBar();
+  touched(); pl.scrolledAt = Date.now(); pl.tap = false;
   const list = $('plList'), w = pl.win, near = 5 * rowHeight();
   if (!w || pl.dragging || pl.limit >= 500) return;
   if (list.scrollTop + list.clientHeight > list.scrollHeight - near && w.offset + w.items.length < w.total) {
@@ -451,6 +577,229 @@ $('plClose').onclick = closeList;
 $('slider').oninput = () => { seeking = true; $('elapsed').textContent = time($('slider').value); drawWave(); };
 $('slider').onchange = () => { seeking = false; waitFor({ action: 'seek', position: Number($('slider').value) }); };
 
+// The ⋯ menu: lyrics, MA's sleep timer and autoplay. It shows the last known settings at once, MA's answer redraws it.
+const opts = { until: 0, autoplay: false, crossfade: false };
+function moreMenu() {
+  const left = Math.ceil((opts.until - Date.now()) / 60000);
+  showMenu([[lyr.on ? 'Hide lyrics' : 'Lyrics', ICONS.lyrics, true, () => setLyrics(!lyr.on)],
+            [left > 0 ? 'Sleep timer · ' + left + ' min' : 'Sleep timer', ICONS.sleep, true, sleepMenu],
+            ['Autoplay ' + (opts.autoplay ? 'on' : 'off'), ICONS.autoplay, true,
+             () => post('action', { action: 'autoplay', on: !opts.autoplay })],
+            ['Browse & search', ICONS.search, true, openBrowse]], $('More'), moreMenu);
+}
+function sleepMenu() {
+  showMenu([15, 30, 45, 60, 120].map(m => [m + ' min', ICONS.sleep, true, () => post('action', { action: 'sleep', minutes: m })])
+    .concat([['Turn off', ICONS.off, opts.until > Date.now(), () => post('action', { action: 'sleep', minutes: 0 })]]), $('More'));
+}
+$('More').onclick = () => { post('action', { action: 'options' }); moreMenu(); };
+
+// A full-screen sheet like the playlist, for the album.
+const sheet = { kind: null };
+function openSheet(kind, head, note) {
+  sheet.kind = kind;
+  $('sheet').className = kind + (audio.paused ? ' paused' : ''); $('sheetBack').style.display = 'none'; sheetFav(null); $('sheetMore').style.display = 'none';
+  $('sheetHead').textContent = head;
+  sheetNote(note);
+  $('sheet').style.display = 'flex';
+}
+function sheetNote(text) {
+  const n = document.createElement('div'); n.className = 'note'; n.textContent = text;
+  $('sheetBody').textContent = ''; $('sheetBody').appendChild(n);
+}
+// A favourite heart: on or off; a tap flips it and sends send(now).
+function heart(el, on, send) {
+  el.classList.toggle('on', !!on);
+  el.onclick = e => { e.stopPropagation(); el.classList.toggle('on'); send(el.classList.contains('on')); };
+}
+const HEART = $('sheetFav').innerHTML;
+const favorite = (uri, it) => on => { it.favorite = on; post('action', { action: 'favorite', uri, on }); };
+// The heart in the sheet header, hidden for null.
+function sheetFav(on, send) { $('sheetFav').style.display = on == null ? 'none' : 'block'; heart($('sheetFav'), on, send); }
+const lab = (box, text) => { const l = box.appendChild(document.createElement('div')); l.className = 'lab'; l.textContent = text; };
+function closeSheet() { sheet.kind = null; $('sheet').style.display = 'none'; $('q').blur(); }
+$('sheetClose').onclick = closeSheet;
+
+// Lyrics from MA in place of the title panel: synced (LRC) lines follow the song, plain ones just show.
+// The choice outlives the page, which renews itself every ~28 min.
+const lyr = { on: false, item: null, lines: [], at: -1, touchedAt: 0 };
+function setLyrics(on) {
+  lyr.on = on;
+  try { localStorage.setItem('lyrics', on ? '1' : ''); } catch (e) {}
+  if (on) askLyrics(); else { $('right').classList.remove('ly'); $('lyNote').textContent = ''; }
+}
+function askLyrics() {
+  Object.assign(lyr, { item: wave.item, lines: [], at: -1 });
+  $('right').classList.remove('ly'); $('lyNote').textContent = 'Looking for lyrics…';
+  post('action', { action: 'lyrics', item: wave.item || '' });
+}
+function showLyrics(l) {
+  const lines = [];
+  (l.lrc || '').split('\n').forEach(line => {
+    const m = line.match(/^\s*\[(\d+):(\d+(?:\.\d+)?)\](.*)/);
+    if (m) lines.push({ at: (Number(m[1]) * 60 + Number(m[2])) * 1000, text: m[3].trim() });
+  });
+  const plain = !lines.length;
+  if (plain) (l.plain || '').split('\n').forEach(text => lines.push({ at: -1, text }));
+  if (!lines.some(x => x.text)) { $('lyNote').textContent = 'No lyrics for this song'; return; }
+  const body = $('lyBody'); body.textContent = ''; body.className = plain ? 'plain' : '';
+  lines.forEach(x => {
+    const d = document.createElement('div'); d.className = 'ly'; d.textContent = x.text || ' ';
+    body.appendChild(d);
+  });
+  body.scrollTop = 0;
+  Object.assign(lyr, { lines: plain ? [] : lines, at: -1 });
+  $('lyNote').textContent = ''; $('right').classList.add('ly');
+}
+function lyricsTick() {
+  if (!lyr.on || !lyr.lines.length) return;
+  const t = trackPosition();
+  let at = -1; lyr.lines.forEach((x, k) => { if (x.at <= t) at = k; });
+  if (at === lyr.at) return;
+  const rows = $('lyBody').children;
+  if (rows[lyr.at]) rows[lyr.at].classList.remove('on');
+  lyr.at = at;
+  if (!rows[at]) return;
+  rows[at].classList.add('on');
+  // Leave the lines alone for a while after a touch.
+  if (Date.now() - lyr.touchedAt > 4000) {
+    const body = $('lyBody');
+    body.scrollTop = rows[at].offsetTop - (body.clientHeight - rows[at].offsetHeight) / 2;
+  }
+}
+$('lyBody').onpointerdown = () => { lyr.touchedAt = Date.now(); };
+$('lyBody').onscroll = () => { if (Date.now() - lyr.touchedAt < 1000) lyr.touchedAt = Date.now(); };
+
+// Browse & search MA's music ({browse: ...}, see ma_control.browse). Albums, playlists and artists open; songs play.
+// Like MA: search is a list; elsewhere albums and artists show as a cover grid, and an artist starts with 5 songs.
+const br = { cur: null, back: [], opening: false, kind: '' };
+const OPENS = ['artist', 'album', 'playlist'];
+function openBrowse() { openSheet('browse', 'Favourites', 'Loading…'); browse('favorites'); }
+// The cover opens the playing song's album, at the song.
+$('album').onclick = $('cover').onclick = () => { openSheet('browse', state.album, 'Loading…'); browse('playing'); };
+$('artist').onclick = () => { openSheet('browse', state.artist, 'Loading…'); browse('playing', 'artist'); };
+function browse(kind, text, opening) {
+  br.opening = !!opening; br.kind = kind;
+  if (!opening) br.back = [];
+  else if (br.cur) br.cur.top = $('sheetBody').scrollTop;   // back returns here
+  $('bFav').classList.toggle('on', kind === 'favorites'); $('bRecent').classList.toggle('on', kind === 'recent');
+  sheetNote(kind === 'search' ? 'Searching…' : 'Loading…');
+  post('action', { action: 'browse', kind, text: text || '', item: wave.item || '' });
+}
+function showBrowse(r) {
+  if (br.opening && br.cur) br.back.push(br.cur);
+  r.kind = br.kind; br.opening = false; br.cur = r;
+  drawBrowse();
+}
+function drawBrowse(top = 0) {
+  const r = br.cur;
+  if (r.title) $('sheetHead').textContent = r.title;
+  $('sheetBack').style.display = br.back.length ? 'inline' : 'none';
+  // an album's heart and ⋮ sit in its header, an artist's or a playlist's in the top bar
+  sheetFav(r.item && !r.header ? r.favorite : null, favorite(r.item, r));
+  $('sheetMore').style.display = r.item && !r.header ? 'block' : 'none';
+  if (r.item) itemMenu($('sheetMore'), r, { uri: r.item });
+  if (!r.sections.length) { sheetNote(r.kind === 'playing' ? 'Nothing to open for this song' : 'Nothing found'); return; }
+  const body = $('sheetBody'); body.textContent = '';
+  if (r.header) body.appendChild(hero(r));
+  r.sections.forEach(sec => {
+    if (sec.name) lab(body, sec.name);
+    const grid = r.kind !== 'search' && sec.rows.every(it => it.type === 'album' || it.type === 'artist');
+    const box = grid ? body.appendChild(document.createElement('div')) : body;
+    if (grid) box.className = 'grid';
+    const short = r.type === 'artist' && sec.name === 'Songs' && !sec.all && sec.rows.length > 6;
+    const discs = r.type === 'album' && sec.rows.some(it => it.disc > 1);   // MA's "Disc N" headers
+    let disc;
+    (short ? sec.rows.slice(0, 5) : sec.rows).forEach(it => {
+      if (discs && it.disc !== disc) lab(box, 'Disc ' + (disc = it.disc));
+      box.appendChild(browseItem(r, it, grid));
+    });
+    if (short) {
+      const all = document.createElement('div'); all.className = 'pr all'; all.textContent = 'All ' + sec.rows.length + ' songs';
+      all.onclick = () => { sec.all = true; drawBrowse(body.scrollTop); };
+      body.appendChild(all);
+    }
+  });
+  const now = !top && r.type !== 'artist' && body.querySelector('.now');   // an artist opens at its top
+  if (now) top = now.offsetTop - body.offsetTop - body.clientHeight / 3;
+  body.style.scrollBehavior = 'auto'; body.scrollTop = top; body.style.scrollBehavior = '';
+}
+// An album's cover, artist (opens the artist) and year, or an artist's photo, as MA's album and artist pages.
+function hero(r) {
+  const h = document.createElement('div'), artist = r.type === 'artist';
+  const rows = name => (r.sections.find(sec => sec.name === name) || { rows: [] }).rows;
+  const songs = artist ? rows('Songs') : r.sections[0] ? r.sections[0].rows : [];
+  h.className = 'hero ' + r.type;
+  h.innerHTML = '<div class="art"><img alt=""></div><div><b></b><a></a><small></small><span class="acts"><span class="heart">' + HEART + '</span><i class="more">⋮</i></span></div>';
+  itemMenu(h.querySelector('.more'), r, { uri: r.item });
+  // the playing album's heart is the player's, so both stay in step
+  if (r.item === (r.now || [])[1] && state.albumFavorite >= 0)
+    heart(h.querySelector('.heart'), state.albumFavorite === 1, () => toggle('albumFavorite', 'favorite_album'));
+  else heart(h.querySelector('.heart'), r.favorite, favorite(r.item, r));
+  if (r.header.image) h.querySelector('img').src = r.header.image; else h.querySelector('.art').textContent = initials(r.title);
+  h.querySelector('b').textContent = r.title;
+  h.querySelector('a').textContent = r.header.artist;
+  if (!r.header.artist) h.querySelector('a').remove();
+  if (r.header.artist_uri) h.querySelector('a').onclick = () => browse('open', r.header.artist_uri, true);
+  const ms = songs.reduce((sum, it) => sum + it.duration_ms, 0);
+  h.querySelector('small').textContent = (artist ? [rows('Albums').length + ' albums', songs.length + ' songs']
+    : [r.header.year || '', songs.length + ' songs', ms ? Math.round(ms / 60000) + ' min' : ''])
+    .filter(Boolean).join(' · ');
+  return h;
+}
+const initials = name => {  // as MA: first letters of two words, or two letters of one
+  const w = name.trim().split(/\s+/).filter(Boolean);
+  return (w.length > 1 ? w[0][0] + w[1][0] : (w[0] || '').slice(0, 2)).toUpperCase();
+};
+// The ⋮ menu of an item: play it, queue it, or view its artist or album.
+function itemMenu(more, r, it) {
+  more.onclick = e => {
+    e.stopPropagation();
+    const add = option => post('action', { action: 'play_media', uri: it.uri, option });
+    showMenu([['Play now', ICONS.play, true, () => { closeSheet(); waitFor({ action: 'play_media', uri: it.uri }); }],
+              ['Play next', ICONS.playNext, true, () => add('next')],
+              ['Add to queue', ICONS.add, true, () => add('add')],
+              ...(it.go || []).filter(go => go[2] !== r.item).map(([kind, name, uri]) => ['View ' + kind + ' ' + name, ICONS[kind], true,
+                                                          () => browse('open', uri, true)])], more);
+  };
+}
+function browseItem(r, it, grid) {
+  const el = document.createElement('div'), opens = OPENS.includes(it.type);
+  el.className = grid ? 'cell ' + it.type : 'pr';
+  el.innerHTML = grid ? '<div class="art"><img alt="" loading="lazy"></div><div class="meta"><div class="tx"><div></div><small></small></div><i class="more">⋮</i></div>'
+    : '<span class="th"><img alt="" loading="lazy"></span><div class="tx"><div></div><small></small></div><span class="d"></span><i class="heart">' + HEART + '</i><i class="more">⋮</i>';
+  if (it.image) el.querySelector('img').src = it.image;
+  else if (grid) el.querySelector('.art').textContent = initials(it.name);
+  // MA's now-playing bars, as in the playlist: the playing song, its album and its artists
+  if ((r.now || []).includes(it.uri))
+    el.querySelector(grid ? '.art' : '.th').insertAdjacentHTML('beforeend', EQ);
+  el.querySelector('.tx div').textContent = it.name;
+  if (!grid) {
+    el.querySelector('.d').textContent = it.duration_ms && !opens ? time(it.duration_ms) : '';
+    const playing = it.uri === (r.now || [])[0];
+    el.classList.toggle('now', playing);
+    heart(el.querySelector('.heart'), playing ? state.songFavorite === 1 : it.favorite,
+          playing ? () => toggle('songFavorite', 'favorite_song') : favorite(it.uri, it));
+  }
+  el.querySelector('small').textContent = it.sub || (grid ? it.type[0].toUpperCase() + it.type.slice(1) : '');
+  el.onclick = () => {
+    if (opens) { $('q').blur(); browse('open', it.uri, true); }
+    else { closeSheet(); waitFor(r.uri ? { action: 'play_media', uri: r.uri, item: it.uri } : { action: 'play_media', uri: it.uri }); }
+  };
+  itemMenu(el.querySelector('.more'), r, it);
+  return el;
+}
+$('sheetBack').onclick = () => { if (br.back.length) { br.cur = br.back.pop(); drawBrowse(br.cur.top); } };
+$('bFav').onclick = () => browse('favorites');
+$('bRecent').onclick = () => browse('recent');
+$('bGoIcon').setAttribute('d', ICONS.search);
+const search = () => { const t = $('q').value.trim(); if (t) { $('q').blur(); browse('search', t); } };
+$('bGo').onclick = search;
+$('q').onkeydown = e => { if (e.key === 'Enter') search(); };
+function toast(text) {
+  const t = $('toast'); t.textContent = text; t.style.display = 'block';
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => { t.style.display = 'none'; }, 2500);
+}
+
 try {
   Alexa.create({ version: '1.1' }).then(({ alexa }) => { alexaClient = alexa; })
     .catch(e => console.log('alexa: ' + e));
@@ -459,5 +808,6 @@ audio.src = state.stream;
 if (state.autoplay) play();
 report();   // at once: MA's new stream may already wait for this page
 askWave();
+try { if (localStorage.getItem('lyrics')) setLyrics(true); } catch (e) {}
 render();
 </script></body></html>

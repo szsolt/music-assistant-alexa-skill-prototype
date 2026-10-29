@@ -340,6 +340,12 @@ def test_an_old_page_is_not_replaced(renew):
     assert renew == [] and not response.directives
 
 
+def test_a_page_the_skill_lost_on_a_restart_is_replaced(renew, monkeypatch):
+    monkeypatch.setattr(lf.bell, "page_of", lambda device_id: None)
+    lf.HtmlPageRenewHandler().handle(_renew("p-old"))
+    assert renew == [("page", True), ("resume", True, None)]
+
+
 def test_a_tapped_playlist_song_plays_from_its_start(monkeypatch):
     calls = []
     monkeypatch.setattr(lf, "_resume_for", lambda device_id, position_ms=None, item_id=None:

@@ -15,7 +15,7 @@ from ask_sdk_model.interfaces.alexa.presentation.apl import (
 from ask_sdk_model.interfaces.alexa.presentation.html import StartDirective
 from ask_sdk_model.interfaces.audioplayer import StopDirective
 
-from skill import apl, bell, device_mapping, html_page, ma_control
+from skill import apl, bell, device_mapping, html_page, ma_control, ma_voice
 from skill import live_page as lp
 
 URL = "https://skill.example/bell/html/"
@@ -178,6 +178,16 @@ def _playlist(monkeypatch):
                         lambda player_id, kind, item_id, shift=0: calls.append((kind, player_id, item_id, shift)) or True)
     monkeypatch.setattr(ma_control, "wave_form",
                         lambda player_id, item_id=None: calls.append(("wave", player_id, item_id)) or [0.5, 1.0])
+    monkeypatch.setattr(ma_control, "options", lambda player_id, kind=None, value=0:
+                        calls.append(("options", kind, value)) or {"sleep_left": 0, "autoplay": True})
+    monkeypatch.setattr(ma_control, "play_media", lambda player_id, uri, option="replace", start=None:
+                        calls.append(("play_media", uri, option, start)) or True)
+    monkeypatch.setattr(ma_control, "browse", lambda player_id, kind, text="", item_id=None:
+                        calls.append(("browse", kind, text, item_id)) or {"title": text, "sections": []})
+    monkeypatch.setattr(ma_control, "now_playing", lambda player_id, item_id=None:
+                        calls.append(("now", item_id)) or ["library://track/14", "library://album/7"])
+    monkeypatch.setattr(ma_control, "set_favorite", lambda player_id, uri, on:
+                        calls.append(("favorite", uri, on)) or uri != "library://album/9")
     page = _html_page()
     return page, html_page.stream(page), calls
 
@@ -226,6 +236,125 @@ def test_page_gets_the_loudness_graph(monkeypatch):
     assert html_page.act(None, page, {"action": "wave", "item": ""})
     assert calls == [("wave", "Office", None)]
     assert json.loads(next(stream)[len("data: "):]) == {"wave": {"item": "", "points": [0.5, 1.0]}}
+
+
+def test_page_sets_the_sleep_timer_and_autoplay(monkeypatch):
+    page, stream, calls = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "sleep", "minutes": 30})
+    assert html_page.act(None, page, {"action": "autoplay", "on": False})
+    assert html_page.act(None, page, {"action": "options"})
+    assert calls == [("options", "sleep", 30), ("options", "autoplay", False), ("options", None, False)]
+    assert json.loads(next(stream)[len("data: "):]) == {"options": {"sleep_left": 0, "autoplay": True}}
+
+
+def test_page_switches_crossfade(monkeypatch):
+    page, stream, calls = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "crossfade", "on": True})
+    assert calls == [("options", "crossfade", True)]
+
+
+def test_page_clears_the_queue_then_gets_its_playlist_again(monkeypatch):
+    page, stream, calls = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "clear", "offset": -1, "limit": 110})
+    assert calls == [("clear", "Office", "", 0), ("window", "Office", None, 110)]
+
+
+def test_page_lists_the_other_players(monkeypatch):
+    page, stream, _ = _playlist(monkeypatch)
+    monkeypatch.setattr(ma_voice, "players", lambda: [("Office", "Office"), ("kitchen", "Kitchen")])
+    next(stream)
+    assert html_page.act(None, page, {"action": "players"})
+    assert json.loads(next(stream)[len("data: "):]) == {"players": [["kitchen", "Kitchen"]]}
+
+
+def test_page_moves_the_music_to_another_player(monkeypatch):
+    page, stream, _ = _playlist(monkeypatch)
+    moved = []
+    monkeypatch.setattr(ma_voice, "move", lambda player_id, target_id: moved.append((player_id, target_id)))
+    next(stream)
+    assert html_page.act(None, page, {"action": "transfer", "target": "kitchen", "name": "Kitchen"})
+    assert moved == [("Office", "kitchen")]
+    assert json.loads(next(stream)[len("data: "):]) == {"toast": "Moved to Kitchen"}
+
+
+def test_page_move_that_fails_says_so(monkeypatch):
+    page, stream, _ = _playlist(monkeypatch)
+
+    def move(player_id, target_id):
+        raise ma_voice.MAUnavailable("down")
+    monkeypatch.setattr(ma_voice, "move", move)
+    next(stream)
+    assert html_page.act(None, page, {"action": "transfer", "target": "kitchen", "name": "Kitchen"})
+    assert json.loads(next(stream)[len("data: "):]) == {"toast": "Music Assistant did not do it"}
+
+
+def test_page_sleep_timer_needs_minutes(monkeypatch):
+    page, _, calls = _playlist(monkeypatch)
+    for action in ({"action": "sleep"}, {"action": "sleep", "minutes": -5}):
+        with pytest.raises(ValueError):
+            html_page.act(None, page, action)
+    assert calls == []
+
+
+def test_page_without_lyrics_gets_empty_ones(monkeypatch):
+    page, stream, _ = _playlist(monkeypatch)
+    monkeypatch.setattr(ma_control, "lyrics", lambda player_id, item_id=None: None)
+    next(stream)
+    assert html_page.act(None, page, {"action": "lyrics", "item": "q13"})
+    assert json.loads(next(stream)[len("data: "):]) == {"lyrics": {"item": "q13", "plain": "", "lrc": ""}}
+
+
+def test_page_plays_an_album_from_a_track(monkeypatch):
+    page, stream, calls = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "play_media", "uri": "library://album/7", "item": "library://track/12"})
+    assert calls == [("play_media", "library://album/7", "replace", "library://track/12")]
+
+
+def test_page_adds_a_song_to_the_queue(monkeypatch):
+    page, stream, calls = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "play_media", "uri": "library://track/12", "option": "add"})
+    assert calls == [("play_media", "library://track/12", "add", None)]
+    assert json.loads(next(stream)[len("data: "):]) == {"toast": "Added to the queue"}
+
+
+def test_page_searches(monkeypatch):
+    page, stream, calls = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "browse", "kind": "search", "text": "esti dal"})
+    assert calls == [("browse", "search", "esti dal", None)]
+    assert json.loads(next(stream)[len("data: "):]) == {"browse": {"title": "esti dal", "sections": []}}
+
+
+def test_page_favourites_an_album(monkeypatch):
+    page, stream, calls = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "favorite", "uri": "library://album/7", "on": True})
+    assert html_page.act(None, page, {"action": "favorite", "uri": "library://album/9", "on": False})
+    assert calls == [("favorite", "library://album/7", True), ("favorite", "library://album/9", False)]
+    assert json.loads(next(stream)[len("data: "):]) == {"toast": "Music Assistant did not do it"}
+
+
+def test_page_hears_what_plays_now(monkeypatch):
+    page, stream, calls = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "now", "item": "q13"})
+    assert calls == [("now", "q13")]
+    assert json.loads(next(stream)[len("data: "):]) == {
+        "now": {"item": "q13", "uris": ["library://track/14", "library://album/7"]}}
+
+
+def test_page_browse_and_play_need_known_options(monkeypatch):
+    page, _, calls = _playlist(monkeypatch)
+    for action in ({"action": "browse", "kind": "delete"}, {"action": "play_media", "uri": "x", "option": "now"},
+                   {"action": "play_media"}, {"action": "favorite", "on": True}):
+        with pytest.raises(ValueError):
+            html_page.act(None, page, action)
+    assert calls == []
 
 
 def test_page_move_needs_a_shift(monkeypatch):
