@@ -2,7 +2,8 @@
 """The player page as a web app (Alexa.Presentation.HTML), all over the LAN.
 
 The page gets its start state inline, then JSON messages over SSE:
-{"set": {field: value}, "src": new stream, "media": "play"|"pause", "ready": True}.
+{"set": {field: value}, "src": new stream, "media": "play"|"pause", "ready": True},
+and {"queue": ...} for its playlist (ma_control.queue_window), {"wave": ...} for its loudness graph.
 It sends its position every second and its buttons as actions.
 
 The skill's logic speaks APL (commands out, UserEvents in): this module is
@@ -25,7 +26,7 @@ from ask_sdk_model.interfaces.alexa.presentation.html import (
     StartDirective, StartRequest, StartRequestMethod, Configuration)
 from ask_sdk_core.serialize import DefaultSerializer
 
-from . import bell
+from . import bell, device_mapping, ma_control
 
 logger = logging.getLogger(__name__)
 
@@ -146,11 +147,17 @@ def take_commands(device_id, response):
         if not commands or page_id not in _started:
             return
         update = message(_serializer.serialize([c for d in commands for c in d.commands or []]))
-        if update and page_id not in _queues:
-            _waiting.setdefault(page_id, []).append(update)
-        for q in _queues.get(page_id, []) if update else []:
-            q.put(update)
+        if update:
+            _push(page_id, update)
     response.directives = [d for d in directives if d not in commands] or None
+
+
+def _push(page_id, update):
+    """Send update to the page's streams, or keep it until one opens. Hold _lock."""
+    if page_id not in _queues:
+        _waiting.setdefault(page_id, []).append(update)
+    for q in _queues.get(page_id, []):
+        q.put(update)
 
 
 def is_open(device_id):
@@ -222,6 +229,7 @@ _ACTIONS = {
     "shuffle": lambda n, a: ["Shuffle", n, int(bool(a["on"]))],
     "repeat": lambda n, a: ["Repeat", n, int(a["mode"]) % 3],
     "queue_ended": lambda n, a: ["QueueEnded"],
+    "jump": lambda n, a: ["Jump", n, str(a["item"])],
 }
 
 
@@ -232,6 +240,8 @@ def act(skill, page_id, action):
     """
     if not bell.device_of(page_id):
         return None
+    if isinstance(action, dict) and action.get("action") in _QUEUE_ACTIONS:
+        return _playlist(page_id, action)
     with _lock:
         number = _presses.get(page_id, 0) + 1
     try:
@@ -241,6 +251,49 @@ def act(skill, page_id, action):
     with _lock:
         _presses[page_id] = number
     _invoke(skill, page_id, arguments)
+    return True
+
+
+# Playlist actions: run on MA directly, not as APL presses.
+_QUEUE_ACTIONS = ("queue", "move", "play_next", "move_end", "delete", "mix", "wave")
+
+
+def _playlist(page_id, action):
+    """{"action": "queue", "offset", "limit"}: send the page its playlist rows (-1: around the playing song).
+
+    "move" (item, shift), "play_next", "move_end", "delete" (item, ...): change
+    the queue first. MA's answer replaces what the page shows, also when MA
+    refuses. "mix" (item): MA plays an endless mix of the song, and the page
+    gets its stream as for any track change. "wave" (item, default the playing
+    song): send {"wave": {"item", "points"}}.
+    """
+    kind = action["action"]
+    try:
+        offset, limit = int(action.get("offset", -1)), min(int(action.get("limit", 110)), 500)
+        item = str(action["item"]) if kind not in ("queue", "wave") else str(action.get("item") or "")
+        shift = int(action["shift"]) if kind == "move" else 0
+        if kind == "move" and not shift:
+            raise ValueError("no shift")    # MA reads 0 as "play next"
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("bad action")
+    player_id = device_mapping.get_player_for_device(bell.device_of(page_id))
+    if not player_id:
+        return True
+    if kind == "wave":
+        update = {"wave": {"item": item, "points": ma_control.wave_form(player_id, item or None)}}
+    elif kind == "mix":
+        if ma_control.edit_queue(player_id, kind, item):
+            return True
+        update = {"ready": True}
+    else:
+        if kind != "queue":
+            ma_control.edit_queue(player_id, kind, item, shift)
+        window = ma_control.queue_window(player_id, offset if offset >= 0 else None, limit)
+        if not window:
+            return True
+        update = {"queue": window}
+    with _lock:
+        _push(page_id, update)
     return True
 
 

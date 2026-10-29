@@ -15,7 +15,7 @@ from ask_sdk_model.interfaces.alexa.presentation.apl import (
 from ask_sdk_model.interfaces.alexa.presentation.html import StartDirective
 from ask_sdk_model.interfaces.audioplayer import StopDirective
 
-from skill import apl, bell, html_page
+from skill import apl, bell, device_mapping, html_page, ma_control
 from skill import live_page as lp
 
 URL = "https://skill.example/bell/html/"
@@ -159,6 +159,81 @@ def test_page_buttons_run_as_apl_user_events_from_its_echo():
     with pytest.raises(ValueError):
         html_page.act(skill, page, {"action": "dance"})
     assert len(seen) == 3
+
+
+def test_page_jump_runs_as_an_apl_user_event():
+    page = _html_page()
+    seen = []
+    assert html_page.act(_skill(seen), page, {"action": "jump", "item": "q7"})
+    assert seen == [("d", ["Jump", 1, "q7"], True)]
+
+
+def _playlist(monkeypatch):
+    calls = []
+    monkeypatch.setattr(device_mapping, "get_player_for_device", lambda device_id: "Office")
+    monkeypatch.setattr(ma_control, "queue_window",
+                        lambda player_id, offset=None, limit=110: calls.append(("window", player_id, offset, limit))
+                        or {"offset": offset or 0, "items": []})
+    monkeypatch.setattr(ma_control, "edit_queue",
+                        lambda player_id, kind, item_id, shift=0: calls.append((kind, player_id, item_id, shift)) or True)
+    monkeypatch.setattr(ma_control, "wave_form",
+                        lambda player_id, item_id=None: calls.append(("wave", player_id, item_id)) or [0.5, 1.0])
+    page = _html_page()
+    return page, html_page.stream(page), calls
+
+
+def test_page_asks_for_its_playlist(monkeypatch):
+    page, stream, calls = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "queue", "offset": -1, "limit": 110})
+    assert calls == [("window", "Office", None, 110)]
+    assert json.loads(next(stream)[len("data: "):]) == {"queue": {"offset": 0, "items": []}}
+
+
+def test_page_moves_a_song_then_gets_its_playlist_again(monkeypatch):
+    page, stream, calls = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "move", "item": "q14", "shift": -2, "offset": 2, "limit": 110})
+    assert calls == [("move", "Office", "q14", -2), ("window", "Office", 2, 110)]
+    assert "queue" in json.loads(next(stream)[len("data: "):])
+
+
+def test_page_deletes_a_song_then_gets_its_playlist_again(monkeypatch):
+    page, stream, calls = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "delete", "item": "q14", "offset": 2, "limit": 110})
+    assert calls == [("delete", "Office", "q14", 0), ("window", "Office", 2, 110)]
+
+
+def test_page_endless_mix_waits_for_the_new_stream(monkeypatch):
+    page, stream, calls = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "mix", "item": "q3"})
+    assert calls == [("mix", "Office", "q3", 0)]
+
+
+def test_page_endless_mix_that_fails_clears_the_wait(monkeypatch):
+    page, stream, _ = _playlist(monkeypatch)
+    monkeypatch.setattr(ma_control, "edit_queue", lambda *a, **k: False)
+    next(stream)
+    assert html_page.act(None, page, {"action": "mix", "item": "q3"})
+    assert json.loads(next(stream)[len("data: "):]) == {"ready": True}
+
+
+def test_page_gets_the_loudness_graph(monkeypatch):
+    page, stream, calls = _playlist(monkeypatch)
+    next(stream)
+    assert html_page.act(None, page, {"action": "wave", "item": ""})
+    assert calls == [("wave", "Office", None)]
+    assert json.loads(next(stream)[len("data: "):]) == {"wave": {"item": "", "points": [0.5, 1.0]}}
+
+
+def test_page_move_needs_a_shift(monkeypatch):
+    page, _, calls = _playlist(monkeypatch)
+    for action in ({"action": "move", "item": "q14", "shift": 0}, {"action": "move", "shift": 1}):
+        with pytest.raises(ValueError):
+            html_page.act(None, page, action)
+    assert calls == []
 
 
 def test_state_report_pulls_only_when_behind():

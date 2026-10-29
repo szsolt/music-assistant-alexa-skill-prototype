@@ -1191,10 +1191,10 @@ class ExceptionEncounteredHandler(AbstractRequestHandler):
 # This section contains handlers related to APL interface
 
 _APL_EVENTS = ("MetadataRefresh", "Next", "Previous", "Pause", "Play", "Seek", "QueueEnded", "Pull",
-               "FavSong", "FavAlbum", "Shuffle", "Repeat", "PlayAlbum")
+               "FavSong", "FavAlbum", "Shuffle", "Repeat", "PlayAlbum", "Jump")
 # Where a button's event carries its press number (bell.pressed).
 _PRESS_NUMBER_AT = {"Next": 1, "Previous": 1, "Play": 2, "Pause": 2, "Seek": 2, "FavSong": 1, "FavAlbum": 1,
-                    "Shuffle": 1, "Repeat": 1, "PlayAlbum": 1}
+                    "Shuffle": 1, "Repeat": 1, "PlayAlbum": 1, "Jump": 1}
 # Favourite buttons: press kind -> what they mark.
 _FAVORITE_PRESSES = {"favsong": "song", "favalbum": "album"}
 # Buttons that set a state; their press carries the state wanted (a number).
@@ -1395,6 +1395,9 @@ def _press(device_id, kind, position_ms=None):
         return True
     if kind == "playalbum":
         return _play_album_for(device_id)
+    if kind == "jump":
+        logger.info("Playlist song tapped")
+        return bool(position_ms) and _resume_for(device_id, item_id=position_ms) == "ok"
     if kind == "pause":
         logger.info("APL pause button at %s ms", position_ms)
         _remember(_paused_at, device_id, position_ms)
@@ -1571,8 +1574,8 @@ class APLUserEventHandler(AbstractRequestHandler):
     - MetadataRefresh: a page without a doorbell sends it every couple of
       seconds. Both update title, artist and images, take MA's hand-offs,
       and on a track change set the track time (see track_time).
-    - Next / Previous / Play / Pause / Seek: the page's own buttons and
-      seek bar (see _press).
+    - Next / Previous / Play / Pause / Seek / Jump: the page's own buttons,
+      seek bar and playlist (see _press).
       They go to MA like "Alexa, next" does; the page's video must not skip
       by itself, since it only has the one flow stream the page was opened with.
     """
@@ -1602,6 +1605,9 @@ class APLUserEventHandler(AbstractRequestHandler):
                 # ["FavSong", press number, 1 to mark or 0 to unmark]; Shuffle 1/0;
                 # Repeat 0 off, 1 all, 2 one
                 position_ms = int(float(arguments[2])) if len(arguments) > 2 else 0
+            if kind == "jump":
+                # ["Jump", press number, queue item id]: a song tapped in the playlist
+                position_ms = str(arguments[2]) if len(arguments) > 2 else None
             done = _press(_device_id_from(handler_input), kind, position_ms)
             # A press stops the page's running command sequence, and with it a
             # refresh chain: restart it (a page with a doorbell has no chain).

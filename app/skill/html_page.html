@@ -31,7 +31,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; position: relative; back
 #nextArtist { font-size: calc(20 * var(--u)); opacity: .8; }
 #controls { margin-top: auto; padding-top: calc(14 * var(--u)); padding-bottom: calc(10 * var(--u)); }
 #sliderRow { display: flex; align-items: center; gap: calc(16 * var(--u)); font-size: calc(20 * var(--u)); }
-#slider { flex: 1; accent-color: var(--accent); height: calc(28 * var(--u)); }
+#seek { flex: 1; position: relative; display: flex; align-items: center; }
+#seek.wave { height: calc(44 * var(--u)); }
+#slider { flex: 1; margin: 0; position: relative; z-index: 1; accent-color: var(--accent); height: calc(28 * var(--u)); }
+#wave { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
+#seek.wave #wave { display: block; } #seek.wave #slider { opacity: 0; height: 100%; }
 #bar { flex: 1; height: calc(4 * var(--u)); background: rgba(255,255,255,.2); overflow: hidden; display: none; }
 #bar::after { content: ""; display: block; width: 30%; height: 100%; background: var(--accent); animation: sweep 1.6s linear infinite; }
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
@@ -43,10 +47,47 @@ html, body { margin: 0; height: 100%; overflow: hidden; position: relative; back
 #PlayPause svg { fill: var(--accent); }
 #buttons .on path:last-child { fill: var(--accent); stroke: var(--accent); }
 .hidden { visibility: hidden; }
-#busy { position: absolute; inset: 0; background: rgba(0,0,0,.65); display: none; align-items: center; justify-content: center; gap: calc(16 * var(--u)); }
+#busy { position: absolute; inset: 0; z-index: 3; background: rgba(0,0,0,.65); display: none; align-items: center; justify-content: center; gap: calc(16 * var(--u)); }
 #busy i { width: calc(20 * var(--u)); height: calc(20 * var(--u)); border-radius: 50%; background: #fff; animation: dot 1.2s infinite; }
 #busy i:nth-child(2) { animation-delay: .2s; } #busy i:nth-child(3) { animation-delay: .4s; }
 @keyframes dot { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
+#pl { position: absolute; inset: 0; z-index: 2; background: rgba(8,10,12,.97); display: none; flex-direction: column; padding: calc(24 * var(--u)) calc(48 * var(--u)); }
+#pl h4 { margin: 0 0 calc(12 * var(--u)); font-size: calc(30 * var(--u)); font-weight: 500; display: flex; justify-content: space-between; }
+#plClose { padding: 0 calc(16 * var(--u)); }
+#plBox { flex: 1; min-height: 0; display: flex; gap: calc(12 * var(--u)); }
+#plList { flex: 1; overflow-y: auto; position: relative; }
+#plBar { width: calc(6 * var(--u)); border-radius: calc(3 * var(--u)); background: rgba(255,255,255,.12); position: relative; }
+#plBar i { position: absolute; left: 0; right: 0; border-radius: inherit; background: rgba(255,255,255,.5); }
+.pr { display: flex; align-items: center; gap: calc(20 * var(--u)); height: calc(96 * var(--u)); padding-left: calc(12 * var(--u));
+  border-bottom: 1px solid rgba(255,255,255,.08); background: #080a0c; position: relative; transition: transform .15s; }
+.pr img { width: calc(68 * var(--u)); height: calc(68 * var(--u)); object-fit: cover; border-radius: calc(4 * var(--u)); flex: none; background: #22313b; }
+/* MA's now-playing bars over the cover; they stop while paused */
+.th { position: relative; flex: none; display: flex; }
+.eq { position: absolute; inset: 0; display: flex; gap: calc(4 * var(--u)); align-items: center; justify-content: center;
+  background: rgba(0,0,0,.45); border-radius: calc(4 * var(--u)); }
+.eq i { width: calc(6 * var(--u)); height: calc(30 * var(--u)); background: var(--accent); transform: scaleY(.25);
+  animation: eq 1s infinite ease-in-out; }
+.eq i:nth-child(2) { animation-delay: .2s; } .eq i:nth-child(3) { animation-delay: .4s; } .eq i:nth-child(4) { animation-delay: .6s; }
+#pl.paused .eq i { animation-play-state: paused; }
+.eq.live i { animation: none; transition: transform .1s linear; }
+@keyframes eq { 0%, 100% { transform: scaleY(.25); } 50% { transform: scaleY(1); } }
+.pr .tx { flex: 1; min-width: 0; font-size: calc(30 * var(--u)); }
+.pr .tx div, .pr small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr small { display: block; font-size: calc(22 * var(--u)); opacity: .65; }
+.pr .d { font-size: calc(22 * var(--u)); opacity: .6; }
+.pr b { width: calc(96 * var(--u)); height: 100%; display: flex; align-items: center; justify-content: center; flex: none;
+  font-size: calc(40 * var(--u)); font-weight: normal; opacity: .6; touch-action: none; }
+.pr.past { opacity: .4; } .pr.now { background: #0e2a35; border-left: calc(6 * var(--u)) solid var(--accent); }
+.lab { font-size: calc(20 * var(--u)); letter-spacing: .08em; text-transform: uppercase; opacity: .6;
+  padding: calc(18 * var(--u)) calc(12 * var(--u)) calc(8 * var(--u)); border-bottom: 1px solid rgba(255,255,255,.08); }
+.pr .more { width: calc(64 * var(--u)); height: 100%; display: flex; align-items: center; justify-content: center; flex: none;
+  font-size: calc(40 * var(--u)); font-style: normal; opacity: .6; }
+#plShade { position: absolute; inset: 0; display: none; }
+#plMenu { position: absolute; right: calc(150 * var(--u)); display: none; background: #22313b; border-radius: calc(12 * var(--u));
+  box-shadow: 0 8px 24px rgba(0,0,0,.9); padding: calc(8 * var(--u)) 0; min-width: calc(320 * var(--u)); }
+#plMenu div { font-size: calc(30 * var(--u)); padding: calc(18 * var(--u)) calc(32 * var(--u)); display: flex; align-items: center; gap: calc(24 * var(--u)); }
+#plMenu svg { width: calc(36 * var(--u)); height: calc(36 * var(--u)); fill: #fff; flex: none; }
+.pr.drag { transition: none; z-index: 2; box-shadow: 0 8px 24px rgba(0,0,0,.9); background: #22313b; }
 </style></head><body>
 <div id="bg"></div>
 <div id="clock"></div>
@@ -62,7 +103,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; position: relative; back
   </div>
   <div id="controls" class="panel">
     <div id="sliderRow"><span id="elapsed">0:00</span>
-      <input id="slider" type="range" min="0" max="0" value="0"><div id="bar"></div>
+      <div id="seek"><canvas id="wave"></canvas><input id="slider" type="range" min="0" max="0" value="0"></div><div id="bar"></div>
       <span id="total">0:00</span></div>
     <div id="quality"></div>
     <div id="buttons">
@@ -74,9 +115,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; position: relative; back
       <button id="Next"><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
       <button id="Repeat"><svg viewBox="0 0 24 24"><path id="repeatIcon" d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg></button>
       <button id="FavSong"><svg viewBox="0 0 24 24"><path transform="translate(4.2,4.07) scale(.65)" fill="none" stroke="#fff" stroke-width="2.4" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></button>
+      <button id="Playlist"><svg viewBox="0 0 24 24"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/></svg></button>
     </div>
   </div>
 </div>
+<div id="pl"><h4><span id="plHead"></span><span id="plClose">✕</span></h4><div id="plBox"><div id="plList"></div><div id="plBar"><i></i></div></div><div id="plShade"></div><div id="plMenu"></div></div>
 <div id="busy"><i></i><i></i><i></i></div>
 <audio id="audio" preload="auto"></audio>
 <script>
@@ -108,6 +151,12 @@ const ICONS = {
   repeat: 'M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z',
 };
 ICONS.repeatOne = ICONS.repeat + 'm-4-2V9h-1l-2 1v1h1.5v4H13z';
+Object.assign(ICONS, {   // Material icons: playlist_play, all_inclusive, vertical_align_bottom, delete
+  playNext: 'M19 9H2v2h17V9zm0-4H2v2h17V5zM2 15h13v-2H2v2zm15-2v6l5-3-5-3z',
+  mix: 'M18.6 6.62c-1.44 0-2.8.56-3.77 1.53L12 10.66 10.48 12h.01L7.8 14.39c-.64.64-1.49.99-2.4.99-1.87 0-3.39-1.51-3.39-3.38S3.53 8.62 5.4 8.62c.91 0 1.76.35 2.44 1.03l1.13 1 1.51-1.34L9.22 8.2C8.2 7.18 6.84 6.62 5.4 6.62 2.42 6.62 0 9.04 0 12s2.42 5.38 5.4 5.38c1.44 0 2.8-.56 3.77-1.53l2.83-2.5.01.01L13.52 12h-.01l2.69-2.39c.64-.64 1.49-.99 2.4-.99 1.87 0 3.39 1.51 3.39 3.38s-1.52 3.38-3.39 3.38c-.9 0-1.76-.35-2.44-1.03l-1.14-1.01-1.51 1.34 1.27 1.12c1.02 1.01 2.37 1.57 3.82 1.57 2.98 0 5.4-2.41 5.4-5.38s-2.42-5.37-5.4-5.37z',
+  toEnd: 'M16 13h-3V3h-2v10H8l4 4 4-4zM4 19v2h16v-2H4z',
+  delete: 'M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
+});
 
 // Times are in ms. trackOffset is where the current track starts in the
 // stream: MA plays the whole queue as one stream. -1 hides a button.
@@ -138,7 +187,8 @@ function render() {
   setImage($('nextImage'), state.nextImage);
   $('upnext').classList.toggle('hidden', !(state.nextDuration >= 0 && state.nextTitle));
   const radio = !state.trackDuration;
-  $('slider').style.display = radio ? 'none' : ''; $('bar').style.display = radio ? 'block' : 'none';
+  $('seek').style.display = radio ? 'none' : ''; $('bar').style.display = radio ? 'block' : 'none';
+  $('seek').classList.toggle('wave', !radio && !!wave.bars);
   $('total').textContent = radio ? '' : time(state.trackDuration);
   $('slider').max = state.trackDuration;
   if (!seeking) { $('slider').value = trackPosition(); $('elapsed').textContent = time(trackPosition()); }
@@ -147,7 +197,40 @@ function render() {
   }
   $('repeatIcon').setAttribute('d', state.repeat === 2 ? ICONS.repeatOne : ICONS.repeat);
   $('playIcon').setAttribute('d', audio.paused ? ICONS.play : ICONS.pause);
+  $('pl').classList.toggle('paused', audio.paused);
+  drawWave();
 }
+
+// MA's loudness graph of the playing song stands in for the slider; the slider stays on top, unseen, for seeking.
+const wave = { item: null, points: null, bars: null };
+function askWave(item) {
+  Object.assign(wave, { item: item || '', points: null, bars: null });
+  post('action', { action: 'wave', item: item || '' });
+}
+function drawWave() {
+  const c = $('wave'), bars = wave.bars, W = c.clientWidth, H = c.clientHeight;
+  if (!bars || !state.trackDuration || !W) return;
+  if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+  const g = c.getContext('2d'), step = W / bars.length;
+  const done = (seeking ? Number($('slider').value) : trackPosition()) / state.trackDuration;
+  g.clearRect(0, 0, W, H);
+  bars.forEach((v, n) => {
+    const h = Math.max(2, v * H);
+    g.fillStyle = n / bars.length < done ? '#18BCF2' : 'rgba(255,255,255,.35)';
+    g.fillRect(n * step, (H - h) / 2, Math.max(1, step * .6), h);
+  });
+}
+
+// As MA's queue: the playing row's 4 bars show the loudness around the play position, 10 times a second.
+setInterval(() => {
+  const eq = pl.open && $('plList').querySelector('.now .eq'), p = wave.points;
+  if (!eq) return;
+  eq.classList.toggle('live', !!p);
+  if (!p || audio.paused || !state.trackDuration) return;
+  const at = Math.floor(Math.min(1, trackPosition() / state.trackDuration) * (p.length - 1));
+  eq.querySelectorAll('i').forEach((bar, k) =>
+    bar.style.transform = 'scaleY(' + Math.max(.25, p[Math.max(0, Math.min(p.length - 1, at - 2 + k))]) + ')');
+}, 100);
 
 function busy(on) { $('busy').style.display = on ? 'flex' : 'none'; }
 function play() { audio.play().catch(e => console.log('play: ' + e)); }
@@ -158,8 +241,15 @@ events.onmessage = e => {
   const msg = JSON.parse(e.data);
   Object.assign(state, msg.set);
   if (msg.ready || msg.src) busy(false);
-  if (msg.src) audio.src = msg.src;
+  if (msg.src) { audio.src = msg.src; askWave(); }
+  if (msg.wave && msg.wave.item === wave.item && msg.wave.points) {
+    const p = msg.wave.points, size = p.length / 200;
+    wave.points = p;
+    wave.bars = Array.from({ length: 200 }, (_, n) => Math.max(0, ...p.slice(Math.floor(n * size), Math.floor((n + 1) * size))));
+  }
   if (msg.media === 'play') play(); else if (msg.media === 'pause') audio.pause();
+  if (msg.queue) { pl.win = msg.queue; pl.offset = msg.queue.offset; if (pl.open && !pl.dragging) drawList(); }
+  else if (pl.open) { clearTimeout(pl.timer); pl.timer = setTimeout(askQueue, 1000); }
   render();
 };
 
@@ -170,12 +260,17 @@ setInterval(report, 1000);
 audio.addEventListener('timeupdate', () => {
   // The next track starts in the same stream: show it without asking the skill.
   if (state.nextDuration >= 0 && state.trackDuration > 0 && trackPosition() >= state.trackDuration) {
+    const item = state.nextItem;
+    askWave(item);
+    // MA may not have the next song's stream details yet: ask again for whatever plays then.
+    setTimeout(() => { if (!wave.bars && wave.item === item) askWave(); }, 5000);
     Object.assign(state, {
       trackOffset: state.trackOffset + state.trackDuration, trackDuration: state.nextDuration,
       title: state.nextTitle, titleSize: state.nextTitleSize, artist: state.nextArtist,
       album: state.nextAlbum, quality: state.nextQuality, nextDuration: -1, nextItem: '',
     });
     if (state.nextImage) state.cover = state.background = state.nextImage;
+    askQueue();
   }
   // MA's queue ends here: stop, or the stream plays on into old music.
   if (state.queueEnd > 0 && position() >= state.queueEnd - 1000) {
@@ -190,6 +285,8 @@ audio.addEventListener('pause', () => {
 });
 setInterval(() => {
   renewWhenDue();
+  if (pl.open && !pl.dragging && Date.now() > pl.closeAt) closeList();
+  if (pl.open) plTick();
   const near = state.trackDuration > 0 && state.trackOffset + state.trackDuration - position() <= 20000;
   $('upnext').style.opacity = near ? 1 : .8;
   const d = new Date(); $('clock').textContent = d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
@@ -209,7 +306,149 @@ $('FavSong').onclick = () => toggle('songFavorite', 'favorite_song');
 $('FavAlbum').onclick = () => toggle('albumFavorite', 'favorite_album');
 $('Shuffle').onclick = () => toggle('shuffle', 'shuffle');
 $('Repeat').onclick = () => post('action', { action: 'repeat', mode: (state.repeat + 1) % 3 });
-$('slider').oninput = () => { seeking = true; $('elapsed').textContent = time($('slider').value); };
+// The playlist: MA's queue, as the skill sends it ({queue: ...}, see ma_control.queue_window).
+// The page keeps no order of its own: MA's answer to a move replaces what it shows.
+const pl = { open: false, offset: -1, limit: 110, win: null, asked: false, again: false, dragging: false,
+             scroll: false, drawnOffset: null, closeAt: 0, timer: 0, scrolledAt: 0, tap: false };
+const rowHeight = () => ($('plList').querySelector('.pr') || {}).offsetHeight || 1;
+const span = ms => { const m = Math.round(ms / 60000);
+  return m >= 60 ? Math.floor(m / 60) + ' h ' + m % 60 + ' min' : m + ' min'; };
+function touched() { pl.closeAt = Date.now() + 30000; }
+function askQueue() {
+  if (!pl.open) return;
+  if (pl.asked) { pl.again = true; return; }
+  pl.asked = true;
+  post('action', { action: 'queue', offset: pl.offset, limit: pl.limit }).then(() => {
+    pl.asked = false;
+    if (pl.again) { pl.again = false; askQueue(); }
+  });
+}
+function openList() {
+  Object.assign(pl, { open: true, offset: -1, limit: 110, scroll: true, drawnOffset: null });
+  $('plList').textContent = ''; $('plHead').textContent = '';
+  $('pl').style.display = 'flex'; touched(); askQueue();
+}
+function closeList() { pl.open = false; closeMenu(); $('pl').style.display = 'none'; }
+function plTick() {
+  const w = pl.win; if (!w) return;
+  const row = w.items[w.index - w.offset], now = $('plList').querySelector('.now .d');
+  if (row && now && row.duration_ms) now.textContent = time(trackPosition()) + ' / ' + time(row.duration_ms);
+  const left = w.after >= 0 && state.trackDuration > 0 ? w.after + state.trackDuration - trackPosition() : -1;
+  $('plHead').textContent = (w.index + 1) + ' of ' + w.total + (left >= 0 ? ' · ' + span(left) + ' left' : '');
+}
+// The row at the top of the list, and how far it is scrolled past.
+function topRow() {
+  const list = $('plList'), rows = list.querySelectorAll('.pr');
+  for (let k = 0; k < rows.length; k++)
+    if (rows[k].offsetTop + rows[k].offsetHeight > list.scrollTop) return { i: pl.drawnOffset + k, dy: list.scrollTop - rows[k].offsetTop };
+  return null;
+}
+function drawList() {
+  const w = pl.win, list = $('plList');
+  const anchor = pl.drawnOffset === null ? null : topRow();
+  list.textContent = '';
+  w.items.forEach((it, k) => {
+    const i = w.offset + k, r = document.createElement('div');
+    const label = i === w.index ? 'Now playing' : i === w.index + 1 ? 'Up next · ' + (w.total - w.index - 1)
+                : i === w.offset && i < w.index ? 'Played' : '';
+    if (label) { const l = document.createElement('div'); l.className = 'lab'; l.textContent = label; list.appendChild(l); }
+    r.className = 'pr' + (i < w.index ? ' past' : i === w.index ? ' now' : '');
+    r.innerHTML = '<span class="th"><img loading="lazy" alt="">' + (i === w.index ? '<span class="eq"><i></i><i></i><i></i><i></i></span>' : '') + '</span><div class="tx"><div></div><small></small></div><span class="d"></span><i class="more">⋮</i><b>☰</b>';
+    if (it.image) r.querySelector('img').src = it.image;
+    r.querySelector('.tx div').textContent = it.title;
+    r.querySelector('small').textContent = [it.secondary, it.album].filter(Boolean).join(' · ');
+    r.querySelector('.d').textContent = it.duration_ms ? time(it.duration_ms) : '';
+    const handle = r.querySelector('b');
+    if (i > w.locked) handle.onpointerdown = e => drag(e, r, k); else handle.style.visibility = 'hidden';
+    r.onclick = e => {
+      if (e.target.closest('b') || !pl.tap) return;
+      if (e.target.closest('.more')) openMenu(it, i, r); else pick(it, i);
+    };
+    list.appendChild(r);
+  });
+  const rows = list.querySelectorAll('.pr'), first = rows[Math.max(0, w.index - w.offset - 1)];
+  if (pl.scroll && first) list.scrollTop = first.offsetTop;
+  else if (anchor && rows[anchor.i - w.offset]) list.scrollTop = rows[anchor.i - w.offset].offsetTop + anchor.dy;
+  pl.scroll = false; pl.drawnOffset = w.offset;
+  plTick(); plBar();
+}
+// As in MA's queue: what a song's ⋮ offers. MA can't change played or loaded songs.
+function openMenu(it, i, row) {
+  touched();
+  const w = pl.win, free = i > w.locked, m = $('plMenu');
+  const edit = action => post('action', { action, item: it.item_id, offset: pl.offset, limit: pl.limit });
+  m.textContent = '';
+  [['Play now', ICONS.play, i !== w.index, () => pick(it, i)],
+   ['Play next', ICONS.playNext, free && i !== w.locked + 1, () => edit('play_next')],
+   ['Endless mix', ICONS.mix, true, () => { closeList(); waitFor({ action: 'mix', item: it.item_id }); }],
+   ['Move to end', ICONS.toEnd, free && i < w.total - 1, () => edit('move_end')],
+   ['Delete', ICONS.delete, free, () => edit('delete')]].forEach(([label, icon, on, run]) => {
+    if (!on) return;
+    const entry = document.createElement('div');
+    entry.innerHTML = '<svg viewBox="0 0 24 24"><path d="' + icon + '"/></svg><span></span>';
+    entry.lastChild.textContent = label;
+    entry.onclick = () => { closeMenu(); run(); };
+    m.appendChild(entry);
+  });
+  m.style.display = 'block'; $('plShade').style.display = 'block';
+  const box = $('pl').getBoundingClientRect(), r = row.getBoundingClientRect();
+  m.style.top = Math.max(8, Math.min(r.bottom - box.top, box.height - m.offsetHeight - 8)) + 'px';
+}
+function closeMenu() { $('plMenu').style.display = $('plShade').style.display = 'none'; }
+$('plShade').onclick = closeMenu;
+function pick(it, i) {
+  closeList();
+  if (i !== pl.win.index) waitFor({ action: 'jump', item: it.item_id });
+}
+// The dragged row follows the finger; the rows in between slide aside to show where it lands.
+function drag(e, row, from) {
+  e.preventDefault(); touched();
+  const list = $('plList'), rows = Array.from(list.querySelectorAll('.pr')), h = row.offsetHeight, y0 = e.clientY, s0 = list.scrollTop;
+  const first = pl.win.locked + 1 - pl.win.offset, last = rows.length - 1;
+  let to = from;
+  pl.dragging = true; row.classList.add('drag');
+  try { row.setPointerCapture(e.pointerId); } catch (err) {}
+  const move = ev => {
+    const dy = ev.clientY - y0 + list.scrollTop - s0;
+    row.style.transform = 'translateY(' + dy + 'px)';
+    to = Math.max(first, Math.min(last, from + Math.round(dy / h)));
+    rows.forEach((r, k) => {
+      if (k !== from) r.style.transform = k > from && k <= to ? 'translateY(-' + h + 'px)' : k < from && k >= to ? 'translateY(' + h + 'px)' : '';
+    });
+    const box = list.getBoundingClientRect();
+    if (ev.clientY < box.top + h / 2) list.scrollTop -= 8; else if (ev.clientY > box.bottom - h / 2) list.scrollTop += 8;
+  };
+  const up = () => {
+    ['pointermove', 'pointerup', 'pointercancel'].forEach((t, k) => row.removeEventListener(t, k ? up : move));
+    pl.dragging = false; touched();
+    const items = pl.win.items;
+    if (to !== from && items[from]) {
+      const item = items[from].item_id;
+      items.splice(to, 0, items.splice(from, 1)[0]);
+      post('action', { action: 'move', item, shift: to - from, offset: pl.offset, limit: pl.limit });
+    }
+    drawList();
+  };
+  row.addEventListener('pointermove', move); row.addEventListener('pointerup', up); row.addEventListener('pointercancel', up);
+}
+// More rows when scrolled near either end. shortcut: at most 500 rows at once, enough for any queue we play.
+// A touch that scrolls the list, or stops it scrolling, is not a tap on a song.
+$('plList').onpointerdown = () => { pl.tap = Date.now() - pl.scrolledAt > 300; };
+$('plList').onscroll = () => {
+  touched(); pl.scrolledAt = Date.now(); pl.tap = false; plBar();
+  const list = $('plList'), w = pl.win, near = 5 * rowHeight();
+  if (!w || pl.dragging || pl.limit >= 500) return;
+  if (list.scrollTop + list.clientHeight > list.scrollHeight - near && w.offset + w.items.length < w.total) {
+    pl.limit += 100; askQueue();
+  } else if (list.scrollTop < near && w.offset > 0) {
+    const offset = Math.max(0, w.offset - 100);
+    pl.limit += w.offset - offset; pl.offset = offset; askQueue();
+  }
+};
+$('upnext').onclick = openList;
+$('Playlist').onclick = openList;
+$('plClose').onclick = closeList;
+$('slider').oninput = () => { seeking = true; $('elapsed').textContent = time($('slider').value); drawWave(); };
 $('slider').onchange = () => { seeking = false; waitFor({ action: 'seek', position: Number($('slider').value) }); };
 
 try {
@@ -219,5 +458,6 @@ try {
 audio.src = state.stream;
 if (state.autoplay) play();
 report();   // at once: MA's new stream may already wait for this page
+askWave();
 render();
 </script></body></html>
