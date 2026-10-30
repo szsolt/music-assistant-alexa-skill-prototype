@@ -115,7 +115,8 @@ async def _get_track_time(client, player_id):
             queue.state == PlaybackState.PAUSED,
             queue.next_item is None,
             _upcoming(client, queue.next_item),
-            quality(queue.current_item))
+            quality(queue.current_item),
+            queue.current_item.queue_item_id)
 
 
 # What the page calls a format, where MA's own name isn't the usual one.
@@ -171,13 +172,13 @@ def _upcoming(client, item):
 
 
 def get_current_track_time(player_id):
-    """(duration_ms, elapsed_ms, paused, last, upcoming, quality) of MA's current track on player_id, or None.
+    """(duration_ms, elapsed_ms, paused, last, upcoming, quality, item_id) of MA's current track on player_id, or None.
 
     duration_ms is None when MA doesn't know the length (e.g. radio); last
     is True when nothing follows it in the queue. upcoming: the next
     track's title, secondary (artist), album, image, duration_ms (0 if
     unknown) and quality, or None: the page switches to it at the track's
-    end. quality: the current track's (see quality()).
+    end. quality: the current track's (see quality()). item_id: its queue item.
     Called once per track change from the APL refresh, not per refresh.
     """
     return _call("read the track time", _get_track_time, player_id)

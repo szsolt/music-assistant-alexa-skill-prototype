@@ -113,6 +113,16 @@ def test_tracker_chains_track_ends_within_a_page():
     assert t.previous_end("s1") == 386_000
 
 
+def test_tracker_new_details_of_the_same_queue_item_keep_its_offset():
+    t = tt.TrackChangeTracker()
+    t.started("s1")
+    t.changed("s1", ("u", "The Spanish train crash", "", ""))
+    t.record("s1", 0, 223_000, item_id="q1")
+    t.changed("s1", ("u", "The Spanish train crash", "", "ABC News Top Stories"))
+    assert t.same_item_offset("s1", "q1") == 0
+    assert t.same_item_offset("s1", "q2") is None
+
+
 def test_tracker_a_track_after_the_pages_first_ends_where_that_one_ends():
     # MA moved on before the page's first pull: a resume 68 s into a 69 s track
     t = tt.TrackChangeTracker()

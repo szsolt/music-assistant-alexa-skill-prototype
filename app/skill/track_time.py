@@ -161,7 +161,8 @@ class TrackChangeTracker:
             self._seen[session_id] = {"key": key, "offset": None, "duration": None,
                                       "last": False, "previous_end": previous_end,
                                       "past_start": old is not None and old["key"] is None
-                                      and previous_end != 0}
+                                      and previous_end != 0,
+                                      "before": old and (old.get("item"), old["offset"])}
             self._seen.move_to_end(session_id)
             while len(self._seen) > self._max:
                 self._seen.popitem(last=False)
@@ -178,6 +179,16 @@ class TrackChangeTracker:
         with self._lock:
             entry = self._seen.get(session_id)
             return bool(entry and entry.get("past_start"))
+
+    def same_item_offset(self, session_id, item_id):
+        """The previous track's offset if it was MA's queue item item_id too, else None.
+
+        MA sends new details for a playing item, e.g. a podcast episode's.
+        """
+        with self._lock:
+            entry = self._seen.get(session_id)
+            before = entry and entry.get("before")
+            return before[1] if item_id and before and before[0] == item_id else None
 
     def offset(self, session_id):
         """Where the current track starts in the session's video (ms), or None."""
@@ -197,15 +208,16 @@ class TrackChangeTracker:
             while len(self._seen) > self._max:
                 self._seen.popitem(last=False)
 
-    def record(self, session_id, offset_ms, duration_ms, last=False):
+    def record(self, session_id, offset_ms, duration_ms, last=False, item_id=None):
         """Remember where the current track lies, for the next change.
 
-        last: nothing follows it in MA's queue.
+        last: nothing follows it in MA's queue. item_id: its MA queue item.
         """
         with self._lock:
             entry = self._seen.get(session_id)
             if entry:
                 entry["offset"], entry["duration"], entry["last"] = offset_ms, duration_ms, last
+                entry["item"] = item_id
 
     def set_last(self, session_id, last):
         """Whether nothing follows the current track now (repeat or shuffle changed)."""

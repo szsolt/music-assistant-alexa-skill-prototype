@@ -1311,11 +1311,14 @@ def _track_time_commands(handler_input, arguments, page_key, info):
         return []
     device_id = _device_id_from(handler_input)
     result = ma_control.get_current_track_time(player_id)
-    duration_ms, elapsed_ms, paused, last, upcoming, quality = (
-        result if result else (None, None, False, False, None, ""))
+    duration_ms, elapsed_ms, paused, last, upcoming, quality, item_id = (
+        result if result else (None, None, False, False, None, "", None))
     position_ms = track_time.video_position_ms(arguments)
     previous_end = _track_changes.previous_end(session_id)
-    if previous_end == 0:   # a new page
+    same_item_offset = _track_changes.same_item_offset(session_id, item_id)
+    if same_item_offset is not None:   # new details for the same track
+        offset = same_item_offset
+    elif previous_end == 0:   # a new page
         offset = track_time.page_start_offset_ms(position_ms, paused, _recall(_paused_at, device_id),
                                                  elapsed_ms, _take_stream_start(device_id),
                                                  _recall(_ma_paused_at, device_id))
@@ -1329,7 +1332,7 @@ def _track_time_commands(handler_input, arguments, page_key, info):
         measure = not _track_changes.past_start(session_id)
         offset = track_time.choose_offset_ms(previous_end, position_ms if measure else None,
                                              elapsed_ms)
-    _track_changes.record(session_id, offset, duration_ms, last)
+    _track_changes.record(session_id, offset, duration_ms, last, item_id)
     logger.info("Track time for %s: duration=%s ms elapsed=%s ms paused=%s offset=%s ms last=%s next=%s",
                 player_id, duration_ms, elapsed_ms, paused, offset, last,
                 upcoming and (upcoming["duration_ms"], bool(upcoming["image"])))
@@ -1514,7 +1517,7 @@ def _modes_handoff_commands(device_id, page_key):
     commands = _mode_commands(_modes_of(player_id))
     result = ma_control.get_current_track_time(player_id)
     if result:
-        _, _, _, last, upcoming, _ = result
+        _, _, _, last, upcoming, _, _ = result
         _track_changes.set_last(page_key, last)
         upcoming = _with_ma_hostname(upcoming)
         _images_on(page_key)["next"] = (upcoming or {}).get("image") or None
