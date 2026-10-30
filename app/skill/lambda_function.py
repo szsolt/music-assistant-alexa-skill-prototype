@@ -1696,7 +1696,10 @@ class APLUserEventHandler(AbstractRequestHandler):
             # Send updated APL document with new metadata
             if changed:
                 try:
-                    util.update_apl_metadata(handler_input.response_builder, info, _images_on(page_key))
+                    # The HTML page doesn't redraw an image it shows, and may not reach its own
+                    # switch to the next one when MA's track start moves it past it.
+                    shown = None if html_page.wanted() else _images_on(page_key)
+                    util.update_apl_metadata(handler_input.response_builder, info, shown)
                     logger.info("APL metadata update directive added to response")
                 except Exception:
                     logger.exception("Failed to update APL metadata")
