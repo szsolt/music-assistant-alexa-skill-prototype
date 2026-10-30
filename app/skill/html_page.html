@@ -400,7 +400,10 @@ audio.addEventListener('pause', () => {
 });
 setInterval(() => {
   renewWhenDue();
-  if (pl.open && !pl.dragging && Date.now() > pl.closeAt) closeList();
+  if (pl.open && !pl.dragging && Date.now() > closeAt) closeList();
+  // Browse stays while paused, and while you type.
+  const typing = ['q', 'askName'].includes(document.activeElement.id) && document.activeElement.value;
+  if (sheet.kind && !audio.paused && !typing && Date.now() > closeAt) { closeMenu(); closeSheet(); }
   if (pl.open) plTick();
   lyricsTick();
   const near = state.trackDuration > 0 && state.trackOffset + state.trackDuration - position() <= 20000;
@@ -424,11 +427,14 @@ $('Repeat').onclick = () => post('action', { action: 'repeat', mode: (state.repe
 // The playlist: MA's queue, as the skill sends it ({queue: ...}, see ma_control.queue_window).
 // The page keeps no order of its own: MA's answer to a move replaces what it shows.
 const pl = { open: false, offset: -1, limit: 110, win: null, asked: false, again: false, dragging: false,
-             scroll: false, drawnOffset: null, closeAt: 0, timer: 0, scrolledAt: 0, tap: false };
+             scroll: false, drawnOffset: null, timer: 0, scrolledAt: 0, tap: false };
 const rowHeight = () => ($('plList').querySelector('.pr') || {}).offsetHeight || 1;
 const span = ms => { const m = Math.round(ms / 60000);
   return m >= 60 ? Math.floor(m / 60) + ' h ' + m % 60 + ' min' : m + ' min'; };
-function touched() { pl.closeAt = Date.now() + 30000; }
+// The playlist and browse close 30 s after the last touch or key.
+let closeAt = 0;
+function touched() { closeAt = Date.now() + 30000; }
+for (const kind of ['pointerdown', 'pointermove', 'keydown']) document.addEventListener(kind, touched, true);
 function askQueue() {
   if (!pl.open) return;
   if (pl.asked) { pl.again = true; return; }
@@ -623,7 +629,7 @@ function openSheet(kind, head, note) {
   $('sheet').className = kind + (audio.paused ? ' paused' : ''); $('sheetBack').style.display = 'none'; sheetFav(null); $('sheetMore').style.display = 'none';
   $('sheetHead').textContent = head;
   sheetNote(note);
-  $('sheet').style.display = 'flex';
+  $('sheet').style.display = 'flex'; touched();
 }
 function sheetNote(text) {
   const n = document.createElement('div'); n.className = 'note'; n.textContent = text;
