@@ -470,12 +470,13 @@ async def _browse(client, player_id, kind, text, item_id=None):
                                 "artist_uri": "", "year": 0}
         else:
             return None
-    else:
-        title = "Favourites"
-        sections = [(name, await get(favorite=True, limit=100)) for name, get in (
+    else:    # favourites, or the whole library by name without its songs (thousands; albums and search reach them)
+        library = kind == "library"
+        title, filters = ("Library", {"limit": 1000}) if library else ("Favourites", {"favorite": True, "limit": 100})
+        sections = [(name, await get(**filters)) for name, get in (
             ("Albums", music.get_library_albums), ("Playlists", music.get_library_playlists),
-            ("Artists", music.get_library_artists), ("Songs", music.get_library_tracks),
-            ("Podcasts", music.get_library_podcasts), ("Audiobooks", music.get_library_audiobooks))]
+            ("Artists", music.get_library_artists), ("Songs", None if library else music.get_library_tracks),
+            ("Podcasts", music.get_library_podcasts), ("Audiobooks", music.get_library_audiobooks)) if get]
     return {"title": title, "uri": uri, "now": now, **opened, "sections": [{"name": name, "rows": [_row(client, i) for i in items]}
                                          for name, items in sections if items]}
 
@@ -586,7 +587,7 @@ def browse(player_id, kind, text="", item_id=None):
     "open" adds "type", "item" (the opened uri) and "favorite"; an album or artist also
     "header": {"image", "artist", "artist_uri", "year"}.
 
-    kind: "favorites", "recent", "search" (text: what to look for), "open" (text: an artist, album or playlist uri),
+    kind: "favorites", "library", "recent", "search" (text: what to look for), "open" (text: an artist, album or playlist uri),
     "playing" (the playing song's album opened, or its artist when text is "artist"). "now": now_playing(item_id).
     """
     return _call("browse the music", _browse, player_id, kind, text, item_id)

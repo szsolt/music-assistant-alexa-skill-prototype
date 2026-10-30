@@ -337,6 +337,13 @@ def test_favourites_skip_empty_sections(monkeypatch):
     assert [s["name"] for s in found["sections"]] == ["Albums", "Artists", "Songs", "Podcasts"]
 
 
+def test_the_library_lists_everything_but_songs(monkeypatch):
+    found, calls = _run(monkeypatch, ma_control._browse, "library", "")
+    assert found["title"] == "Library"
+    assert [s["name"] for s in found["sections"]] == ["Albums", "Artists", "Podcasts"]
+    assert ("library_albums", ("limit", 1000)) in calls
+
+
 def test_an_album_opens_with_its_discs_and_favourite(monkeypatch):
     found, _ = _run(monkeypatch, ma_control._browse, "open", "library://album/8")
     assert (found["type"], found["item"], found["favorite"]) == ("album", "library://album/8", False)

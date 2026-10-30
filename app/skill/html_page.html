@@ -195,7 +195,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; position: relative; back
 <div id="plOpts"><span id="plAuto">Autoplay</span><span id="plFade"><svg class="rings" viewBox="0 0 24 24"><circle cx="9" cy="9" r="7"/><circle cx="15" cy="15" r="7"/></svg>Crossfade</span><span id="plClear">Clear</span><span id="plMove">Move to…</span><span id="plSave">Save</span></div><div id="plBox"><div id="plList"></div></div></div>
 <div id="sheet"><h4><span id="sheetBack">‹</span><span id="sheetHead"></span><span id="sheetFav" class="heart"><svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></span><span id="sheetMore" class="more">⋮</span><span id="sheetClose">✕</span></h4>
 <div id="bBar"><input id="q" type="search" enterkeyhint="search" placeholder="Search"><span id="bGo"><svg viewBox="0 0 24 24"><path id="bGoIcon"/></svg></span>
-<span id="bFav">Favourites</span><span id="bRecent">Recent</span></div><div id="sheetBody"></div></div>
+<span id="bFav">Favourites</span><span id="bLib">Library</span><span id="bRecent">Recent</span></div><div id="sheetBody"></div></div>
 <div id="toast"></div>
 <div id="shade"></div><div id="menu"></div>
 <div id="ask"><input id="askName" placeholder="Playlist name" maxlength="100" enterkeyhint="done"><span id="askOk">Create</span></div>
@@ -710,7 +710,7 @@ function browse(kind, text, opening) {
   br.opening = !!opening; br.kind = kind;
   if (!opening) br.back = [];
   else if (br.cur) br.cur.top = $('sheetBody').scrollTop;   // back returns here
-  $('bFav').classList.toggle('on', kind === 'favorites'); $('bRecent').classList.toggle('on', kind === 'recent');
+  $('bFav').classList.toggle('on', kind === 'favorites'); $('bLib').classList.toggle('on', kind === 'library'); $('bRecent').classList.toggle('on', kind === 'recent');
   sheetNote(kind === 'search' ? 'Searching…' : 'Loading…');
   post('action', { action: 'browse', kind, text: text || '', item: wave.item || '' });
 }
@@ -735,15 +735,17 @@ function drawBrowse(top = 0) {
     const grid = r.kind !== 'search' && sec.rows.every(it => ['album', 'artist', 'podcast', 'audiobook'].includes(it.type));
     const box = grid ? body.appendChild(document.createElement('div')) : body;
     if (grid) box.className = 'grid';
-    const short = r.type === 'artist' && sec.name === 'Songs' && !sec.all && sec.rows.length > 6;
+    // an artist's songs and each library section show their first rows, as MA's pages
+    const first = r.type === 'artist' && sec.name === 'Songs' ? 5 : r.kind === 'library' ? 12 : 0;
+    const short = first && !sec.all && sec.rows.length > first + 1;
     const discs = r.type === 'album' && sec.rows.some(it => it.disc > 1);   // MA's "Disc N" headers
     let disc;
-    (short ? sec.rows.slice(0, 5) : sec.rows).forEach(it => {
+    (short ? sec.rows.slice(0, first) : sec.rows).forEach(it => {
       if (discs && it.disc !== disc) lab(box, 'Disc ' + (disc = it.disc));
       box.appendChild(browseItem(r, it, grid));
     });
     if (short) {
-      const all = document.createElement('div'); all.className = 'pr all'; all.textContent = 'All ' + sec.rows.length + ' songs';
+      const all = document.createElement('div'); all.className = 'pr all'; all.textContent = 'All ' + sec.rows.length + ' ' + sec.name.toLowerCase();
       all.onclick = () => { sec.all = true; drawBrowse(body.scrollTop); };
       body.appendChild(all);
     }
@@ -824,6 +826,7 @@ function browseItem(r, it, grid) {
 }
 $('sheetBack').onclick = () => { if (br.back.length) { br.cur = br.back.pop(); drawBrowse(br.cur.top); } };
 $('bFav').onclick = () => browse('favorites');
+$('bLib').onclick = () => browse('library');
 $('bRecent').onclick = () => browse('recent');
 $('bGoIcon').setAttribute('d', ICONS.search);
 const search = () => { const t = $('q').value.trim(); if (t) { $('q').blur(); browse('search', t); } };

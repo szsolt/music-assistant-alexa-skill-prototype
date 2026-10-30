@@ -259,7 +259,7 @@ def act(skill, page_id, action):
 _MA_ACTIONS = ("queue", "move", "play_next", "move_end", "delete", "clear", "mix", "wave",
                "lyrics", "options", "sleep", "autoplay", "crossfade", "play_media", "browse", "favorite", "now",
                "players", "transfer", "playlists", "add_to_playlist")
-_BROWSE_KINDS = ("favorites", "recent", "search", "open", "playing")
+_BROWSE_KINDS = ("favorites", "library", "recent", "search", "open", "playing")
 _PLAY_OPTIONS = {"replace": "", "next": "Playing next", "add": "Added to the queue"}
 
 
@@ -271,7 +271,7 @@ def _on_ma(page_id, action):
     refuses. "mix" (item) and "play_media" (uri, option "replace", item: the
     track to start at): MA replaces the queue, and the page gets its stream as
     for any track change. "play_media" with option "next" or "add" sends
-    {"toast": text}. "browse" (kind: favorites|recent|search|open|playing, text: the
+    {"toast": text}. "browse" (kind: favorites|library|recent|search|open|playing, text: the
     search, the uri to open or "artist" for playing, item: the page's song): send {"browse": ma_control.browse}. "now" (item):
     send {"now": {"item", "uris": ma_control.now_playing}}. "favorite"
     (uri, on): sends a toast only if MA refuses. "wave" and "lyrics" (item, default the playing song): send
