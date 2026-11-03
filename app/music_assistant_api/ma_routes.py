@@ -4,7 +4,11 @@ from flask import jsonify, request
 import os
 import time
 from urllib.parse import urlparse, urlunparse
+import logging
 import shared_store
+from skill import bell, device_mapping, live_page, ma_control
+
+logger = logging.getLogger(__name__)
 
 
 def _rewrite_url(url: str) -> str:
@@ -27,6 +31,53 @@ def _rewrite_url(url: str) -> str:
         return url
 
 
+def _fall_back_to_speech(player_id):
+    """For a hand-off the page missed: have MA do it the spoken way."""
+    def missed(device_id, command):
+        logger.warning("Open page on %s missed the %s hand-off: asking MA to do it the spoken way",
+                       player_id, command)
+        if command in ("stream", "resume"):
+            if ma_control.resume_at(player_id) is None:
+                logger.warning("MA did not resend the stream for %s", player_id)
+        elif command == "pause":
+            # MA is paused already and the Echo still plays: MA pauses again,
+            # now speaking (the page counts as closed); its echo is ours.
+            ma_control.mark_ma_triggered(device_id, "pause")
+            if not ma_control.send_player_command(player_id, "pause"):
+                logger.warning("MA did not pause %s again", player_id)
+    return missed
+
+
+def _offer_to_open_page(data, command, value=None):
+    """True if an open page of MA's player takes command, so MA needn't speak.
+
+    Only when MA says it can leave its utterance out: an MA that speaks
+    anyway brings up a new page, and the open one must not switch as well.
+    """
+    player_id = data.get('playerId')
+    if not data.get('canSkipSpeech') or not player_id:
+        return False
+    for device_id in device_mapping.get_devices_for_player(player_id):
+        if live_page.offer(device_id, command, value, on_missed=_fall_back_to_speech(player_id)):
+            logger.info("Handing %s to the open page on %s", command, player_id)
+            bell.news([device_id])
+            return True
+    return False
+
+
+def _silent_pause(data):
+    """True if MA's pause is one the skill asked for after the page closed (see
+    live_page.expect_silent_pause), so MA needn't speak."""
+    player_id = data.get('playerId')
+    if not data.get('canSkipSpeech') or not player_id:
+        return False
+    for device_id in device_mapping.get_devices_for_player(player_id):
+        if live_page.takes_silent_pause(device_id):
+            logger.info("Pause for %s needs no speech: its page has closed", player_id)
+            return True
+    return False
+
+
 def register_routes(bp):
     @bp.route('/push-url', methods=['POST'])
     def push_url():
@@ -38,17 +89,37 @@ def register_routes(bp):
         stream_url = _rewrite_url(stream_url)
         image_url = _rewrite_url(data.get('imageUrl'))
 
-        shared_store._version += 1
-        shared_store._store = {
+        player_id = shared_store.save({
             'streamUrl': stream_url,
             'title': data.get('title'),
             'artist': data.get('artist'),
             'album': data.get('album'),
             'imageUrl': image_url,
-            'version': shared_store._version,
+            'playerId': data.get('playerId'),
+            'version': shared_store._version + 1,
             'timestamp': time.time()
-        }
-        return jsonify({'status': 'ok', 'version': shared_store._version})
+        })
+        if not data.get('playerId'):
+            # MA's new metadata for its stream (a track change in its flow):
+            # the player's pages with a doorbell pull it.
+            bell.news(device_mapping.get_devices_for_player(player_id) if player_id else None)
+        page_live = _offer_to_open_page(data, 'stream', stream_url)
+        if data.get('playerId') and not page_live:
+            bell.stream_sent(device_mapping.get_devices_for_player(player_id))
+        if not page_live:
+            device_mapping.wait_for_pairing(data.get('playerId'))
+        return jsonify({'status': 'ok', 'version': shared_store._version, 'pageLive': page_live})
+
+    @bp.route('/control', methods=['POST'])
+    def control():
+        """MA's pause/resume: {playerId, command, canSkipSpeech}; pageLive: leave it to us."""
+        data = request.get_json(silent=True) or {}
+        command = data.get('command')
+        if command not in ('pause', 'resume'):
+            return jsonify({'error': 'Unsupported command'}), 400
+        page_live = (_offer_to_open_page(data, command)
+                     or (command == 'pause' and _silent_pause(data)))
+        return jsonify({'status': 'ok', 'pageLive': page_live})
 
     @bp.route('/latest-url', methods=['GET'])
     def latest_url():

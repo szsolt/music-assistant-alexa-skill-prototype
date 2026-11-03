@@ -1,7 +1,10 @@
 import os
+import sys
 from flask import Flask, request, jsonify, Response, g
 from flask_ask_sdk.skill_adapter import SkillAdapter
+from ask_sdk_webservice_support.verifier import RequestVerifier
 from skill.lambda_function import sb  # sb is the SkillBuilder from skill/lambda_function.py
+from skill import bell, html_page
 import json
 import music_assistant_api as ma_api
 import alexa_api as alexa_api
@@ -91,15 +94,34 @@ try:
 except Exception:
     pass
 # Without a skill ID ask-sdk skips the check that a request is meant for this skill.
-sb.skill_id = os.environ.get('SKILL_ID', '')
-if not sb.skill_id:
-    # The setup page creates the skill, so a first run has no ID yet.
-    app.logger.warning('SKILL_ID is not set: accepting signed requests for any skill')
+sb.skill_id = os.environ.get('SKILL_ID') or sys.exit('SKILL_ID is not set')
+
+
+def _one_at_a_time(check):
+    # The certificate check reads the shared trust roots, which asn1crypto
+    # parses lazily and not thread-safely: two requests right after a start
+    # (a page's pull and a button press) failed with KeyErrors.
+    lock = threading.Lock()
+
+    def locked(self, cert_chain):
+        with lock:
+            return check(self, cert_chain)
+    return locked
+
+
+RequestVerifier._validate_cert_chain = _one_at_a_time(RequestVerifier._validate_cert_chain)
 app.config['ALEXA_SKILL'] = sb.create()   # the simulator page runs requests on it
 skill_adapter = SkillAdapter(
     skill=app.config['ALEXA_SKILL'],
     skill_id=sb.skill_id,
     app=app)
+
+# Voice commands: keep the slot types from MA's library names up to date.
+try:
+    from skill import voice_lists
+    voice_lists.start()
+except Exception:
+    app.logger.exception('Could not start the voice names job')
 
 # Mount the Music Assistant API (only ma routes will be mounted at /ma)
 ma_app = ma_api.create_ma_app()
@@ -160,6 +182,12 @@ except Exception:
 def _check_app_basic_auth():
     # Allow the Alexa skill POST endpoint to be called without app-level auth
     if request.path == '/' and request.method == 'POST':
+        return None
+    # The player page's doorbell image is loaded by the Show, which has no credentials
+    if request.path.startswith('/bell/') and request.method == 'GET':
+        return None
+    # The HTML player page's events: its page id is its only credential (see skill/html_page.py)
+    if request.path.startswith('/bell/html/') and request.method == 'POST':
         return None
     # Read credentials from secrets (APP_USERNAME/APP_PASSWORD)
     app_user = get_env_secret('APP_USERNAME')
@@ -273,6 +301,17 @@ try:
 except Exception:
     pass
 
+# Pause MA when a player page goes quiet (see skill/bell.py).
+bell.start_sweeping()
+
+# The skill's one MA connection (see skill/ma_client.py); the pages' "Up next" follows its queue changes.
+try:
+    from skill import ma_client, ma_events
+    ma_events.start()
+    ma_client.start()
+except Exception:
+    app.logger.exception("Could not start the connection to MA")
+
 
 def _setup_reader_thread(proc, prefix=None):
     # Delegate implementation to helpers while binding enqueue function
@@ -287,6 +326,75 @@ def _read_master_loop(master_fd, prefix=None):
 @app.route("/", methods=["POST"])
 def invoke_skill():
     return skill_adapter.dispatch_request()
+
+
+@app.route('/bell/<page>/<int:seen>/<int:tick>.png', methods=['GET'])
+@app.route('/bell/<page>/<int:seen>/<int:tick>/<press>.png', methods=['GET'])
+@app.route('/bell/<page>/<int:seen>/<int:tick>/<int:at>/<int:playing>/<press>.png', methods=['GET'])
+def bell_image(page, seen, tick, press=None, at=None, playing=None):
+    # The player page's doorbell (see skill/bell.py): a 404 tells the page to pull.
+    # The shorter URLs are from pages sent by older versions.
+    status = 200 if bell.rang(page, seen, press, at, playing) else 404
+    resp = Response(bell.PNG if status == 200 else b'', status, mimetype='image/png')
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
+@app.route('/bell/logo.png', methods=['GET'])
+def bell_logo():
+    # Music Assistant's logo in the player page's header (see bell.logo_url).
+    with open(bell.LOGO_PATH, 'rb') as f:
+        resp = Response(f.read(), mimetype='image/png')
+    resp.headers['Cache-Control'] = 'max-age=86400'
+    return resp
+
+
+HTML_PAGE_PATH = Path(__file__).parent / 'skill' / 'html_page.html'
+
+
+@app.route('/bell/html/<page>', methods=['GET'])
+def html_player_page(page):
+    # The HTML player page (see skill/html_page.py), with its start state inline.
+    start = html_page.start_state(page)
+    if start is None:
+        return Response('Unknown page', 404)
+    start = json.dumps(start).replace('</', '<\\/')
+    resp = Response(HTML_PAGE_PATH.read_text().replace('/*START*/null', start), mimetype='text/html')
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
+@app.route('/bell/html/<page>/events', methods=['GET'])
+def html_player_events(page):
+    if html_page.start_state(page) is None:
+        return Response('Unknown page', 404)
+    resp = Response(html_page.stream(page), mimetype='text/event-stream')
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
+@app.route('/bell/html/<page>/state', methods=['POST'])
+def html_player_state(page):
+    body = request.get_json(silent=True) or {}
+    try:
+        seen, at, playing = int(body['seen']), max(int(body['at']), 0), bool(body['playing'])
+    except (KeyError, TypeError, ValueError):
+        return Response('Bad state', 400)
+    if not html_page.report(app.config['ALEXA_SKILL'], page, seen, at, playing):
+        return Response('Unknown page', 404)
+    return Response(status=204)
+
+
+@app.route('/bell/html/<page>/action', methods=['POST'])
+def html_player_action(page):
+    try:
+        done = html_page.act(app.config['ALEXA_SKILL'], page, request.get_json(silent=True))
+    except ValueError:
+        return Response('Bad action', 400)
+    if done is None:
+        return Response('Unknown page', 404)
+    return Response(status=204)
+
 
 # Expose OpenAPI spec and Swagger UI from the main app so docs are available
 # at `/openapi.json` and `/docs` (keeps documentation separate from the API

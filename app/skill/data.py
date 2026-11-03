@@ -27,7 +27,36 @@ NOT_POSSIBLE_MSG = _("This is radio, you can not do that.  You can ask me to sto
 STOP_MSG = _("")
 DEVICE_NOT_SUPPORTED = _("Sorry, this skill is not supported on this device")
 DEVICE_NOT_MAPPED_MSG = _("This device is not paired with a Music Assistant player yet. Please configure it on the status page.")
-MA_COMMAND_FAILED_MSG = _("Sorry, I could not reach Music Assistant to skip the track.")
+UNPAIRED_ECHO_MSG = _("This Echo isn't linked to a Music Assistant player yet. Start music on it from Music Assistant once.")
+MA_COMMAND_FAILED_MSG = _("Sorry, I could not reach Music Assistant.")
+MA_UNAVAILABLE_MSG = _("Music Assistant isn't responding right now.")
+NOT_FOUND_MSG = _("I couldn't find {} in your library.")
+PLAY_FAILED_MSG = _("I couldn't play {}.")
+FAVORITE_ADDED_MSG = _("Added {} to your favourites.")
+FAVORITE_REMOVED_MSG = _("Removed {} from your favourites.")
+NOTHING_TO_FAVORITE_MSG = _("Nothing is playing that I can add to your favourites.")
+WHAT_TO_PLAY_MSG = _("What should I play? For example, say: play the album Abbey Road.")
+PLAYING_MSG = _("Playing {}")
+SHUFFLING_MSG = _("Shuffling {}")
+RADIO_MSG = _("Playing a radio based on {}")
+QUEUED_MSG = _("Added {} to the queue")
+PLAYING_NEXT_MSG = _("Playing {} next")
+MOVING_MSG = _("Moving the music to {}")
+NO_PLAYER_MSG = _("I couldn't find a player called {}.")
+ALREADY_THERE_MSG = _("The music is already playing on {}.")
+RANDOM_MSG = _("Shuffling your library")
+SLEEP_SET_MSG = _("OK, the music stops in {}.")
+SLEEP_HOW_LONG_MSG = _("How long? For example, say: stop in 30 minutes.")
+SLEEP_CANCELLED_MSG = _("Sleep timer cancelled.")
+NO_SLEEP_TIMER_MSG = _("There's no sleep timer.")
+EMPTY_LIBRARY_MSG = _("Your library is empty.")
+BY_MSG = _("{} by {}")
+NOW_PLAYING_MSG = _("This is {}")
+NOTHING_PLAYING_MSG = _("Nothing is playing right now.")
+SHUFFLE_ON_MSG = _("Shuffle is on.")
+SHUFFLE_OFF_MSG = _("Shuffle is off.")
+REPEAT_ON_MSG = _("Repeat is on.")
+REPEAT_OFF_MSG = _("Repeat is off.")
 
 info = {
     "audioSources": "",
@@ -37,51 +66,55 @@ info = {
     "headerTitle": "",
     "headerSubtitle": "",
     "primaryText": "",
-    "secondaryText": ""
+    "secondaryText": "",
+    "albumText": ""
 }
 
-def get_latest(api_hostname=None, path='/ma/latest-url', scheme='http', timeout=5, username=None, password=None):
+def info_from(payload):
+    """The page's metadata (as data.info) from a stream MA pushed."""
+    stream_url = payload.get('streamUrl') or ''
+    title = payload.get('title', '') or ''
+    artist = payload.get('artist', '') or ''
+    album = payload.get('album', '') or ''
+    image = payload.get('imageUrl') or ''
+    if stream_url and isinstance(stream_url, str):
+        try:
+            stream_url = re.sub(r'(?i)\.flac(?=$|\?)', '.mp3', stream_url)
+        except Exception:
+            logging.exception('Failed rewriting stream URL extension for %s', stream_url)
+    return {
+        'audioSources': stream_url,
+        'backgroundImageSource': image,
+        'coverImageSource': image,
+        'headerAttributionImage': '',
+        'headerTitle': '',
+        'headerSubtitle': '',
+        'primaryText': title,
+        'secondaryText': artist,
+        'albumText': album
+    }
+
+
+def get_latest(api_hostname=None, path='/ma/latest-url', scheme='http', timeout=5, username=None,
+               password=None, player_id=None):
+    """{'changed': ..., 'info': metadata}; with player_id, that MA player's.
+
+    data.info is set too (the latest of any player), for the status pages.
+    """
     global info
 
     # PRIORITAET 1: Direkt aus shared_store lesen (KEIN CACHE!)
     try:
         import shared_store
-        if shared_store._store and shared_store._store.get('streamUrl'):
-            payload = shared_store._store
-
-            stream_url = payload.get('streamUrl') or ''
-            title = payload.get('title', '') or ''
-            artist = payload.get('artist', '') or ''
-            album = payload.get('album', '') or ''
-            image = payload.get('imageUrl') or ''
-
-            secondary = ''
-            if artist and album:
-                secondary = f"{artist} - {album}"
-            elif artist:
-                secondary = artist
-            elif album:
-                secondary = album
-
-            if stream_url and isinstance(stream_url, str):
-                try:
-                    stream_url = re.sub(r'(?i)\.flac(?=$|\?)', '.mp3', stream_url)
-                except Exception:
-                    logging.exception('Failed rewriting stream URL extension for %s', stream_url)
-
-            info.update({
-                'audioSources': stream_url,
-                'backgroundImageSource': image,
-                'coverImageSource': image,
-                'headerAttributionImage': '',
-                'headerTitle': '',
-                'headerSubtitle': '',
-                'primaryText': title,
-                'secondaryText': secondary
-            })
-
-            logging.info('Loaded from shared_store: %s - %s', title, stream_url[:60])
-            return {'changed': True}
+        payload = shared_store.for_player(player_id)
+        if payload and payload.get('streamUrl'):
+            player_info = info_from(payload)
+            info.update(player_info)
+            logging.info('Loaded from shared_store: %s - %s', player_info['primaryText'],
+                         player_info['audioSources'][:60])
+            return {'changed': True, 'info': player_info}
+        if player_id:
+            return {'changed': False, 'info': dict(info, audioSources='')}
     except Exception as e:
         logging.warning('shared_store read failed: %s', e)
 
@@ -119,14 +152,6 @@ def get_latest(api_hostname=None, path='/ma/latest-url', scheme='http', timeout=
             album = payload.get('album', '') or ''
             image = payload.get('imageUrl') or ''
 
-            secondary = ''
-            if artist and album:
-                secondary = f"{artist} - {album}"
-            elif artist:
-                secondary = artist
-            elif album:
-                secondary = album
-
             if stream_url and isinstance(stream_url, str):
                 try:
                     stream_url = re.sub(r'(?i)\.flac(?=$|\?)', '.mp3', stream_url)
@@ -141,7 +166,8 @@ def get_latest(api_hostname=None, path='/ma/latest-url', scheme='http', timeout=
                 'headerTitle': '',
                 'headerSubtitle': '',
                 'primaryText': title,
-                'secondaryText': secondary
+                'secondaryText': artist,
+                'albumText': album
             })
 
             return {'changed': True}
