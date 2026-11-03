@@ -5,50 +5,11 @@ def test_video_position_from_event_arguments():
     assert tt.video_position_ms(["MetadataRefresh", 3, 125000]) == 125000
     assert tt.video_position_ms(["MetadataRefresh", 3, "1250.7"]) == 1250
     assert tt.video_position_ms(["MetadataRefresh", 3, -5]) == 0
-
-
-def test_video_position_missing_or_garbage():
+    assert tt.video_position_ms(["Pause", 61000.4], index=1) == 61000
     assert tt.video_position_ms(["MetadataRefresh", 3]) is None
     assert tt.video_position_ms(["MetadataRefresh", 3, "${videoProgressValue}"]) is None
     assert tt.video_position_ms(None) is None
-
-
-def test_offset_is_position_minus_elapsed():
-    # third track of a flow stream: 400 s of stream played, 12 s into the track
-    assert tt.track_offset_ms(400_000, 12_000) == 388_000
-
-
-def test_offset_never_negative():
-    # a fresh page: the video lags MA's clock slightly
-    assert tt.track_offset_ms(300, 1_200) == 0
-    assert tt.track_offset_ms(67_000, 196_000) == -129_000   # a stream from a resume
-
-
-def test_tracker_reports_each_change_once_per_session():
-    t = tt.TrackChangeTracker()
-    a, b = ("u", "Song A", "X"), ("u", "Song B", "X")
-    assert t.changed("s1", a) is True
-    assert t.changed("s1", a) is False
-    assert t.changed("s1", b) is True
-    assert t.changed("s2", b) is True   # a new page is a change
-    assert t.changed("s1", b) is False
-
-
-def test_tracker_forgets_oldest_sessions():
-    t = tt.TrackChangeTracker(max_sessions=2)
-    k = ("u", "Song", "")
-    t.changed("s1", k)
-    t.changed("s2", k)
-    t.changed("s3", k)
-    assert t.changed("s1", k) is True
-
-
-def test_track_key_uses_stream_and_titles():
-    info = {"audioSources": "https://h/flow/x.mp3", "primaryText": "T", "secondaryText": "A", "albumText": "B"}
-    assert tt.track_key(info) == ("https://h/flow/x.mp3", "T", "A", "B")
-    assert tt.track_key({}) == ("", "", "", "")
-    # same song on another album: another track
-    assert tt.track_key(dict(info, albumText="Live")) != tt.track_key(info)
+    assert tt.video_position_ms(["Play"], index=1) is None
 
 
 def test_set_track_time_commands():
@@ -79,104 +40,6 @@ def test_set_track_time_commands_unknown():
                                                                  ("nextQuality", ""), ("nextItem", ""), ("quality", "")]
 
 
-def test_offset_prefers_previous_track_end():
-    assert tt.choose_offset_ms(215_000, None, 3_000) == 215_000
-    assert tt.choose_offset_ms(215_000, 219_500, 3_000) == 215_000    # 1.5 s off: MA's answer took that long
-
-
-def test_offset_resyncs_to_ma_when_the_track_ends_drifted():
-    # Whole-second lengths added up: the page's track started 10 s off MA's.
-    assert tt.choose_offset_ms(215_000, 208_000, 3_000) == 205_000
-    assert tt.choose_offset_ms(215_000, 228_000, 3_000) == 225_000
-
-
-def test_offset_ignores_a_position_far_off():
-    assert tt.choose_offset_ms(3_600_000, 0, 5_000) == 3_600_000      # a page whose video hasn't started
-
-
-def test_an_html_page_resyncs_to_ma_however_far_off():
-    # MA went to the next song 36 s before the stream offsets said
-    assert tt.choose_offset_ms(574_296, 574_296, 30_029, any_gap=True) == 544_267
-
-
-def test_offset_falls_back_to_position_then_none():
-    assert tt.choose_offset_ms(None, 400_000, 12_000) == 388_000
-    assert tt.choose_offset_ms(None, None, 12_000) is None
-    assert tt.choose_offset_ms(None, 400_000, None) is None
-
-
-def test_tracker_chains_track_ends_within_a_page():
-    t = tt.TrackChangeTracker()
-    t.started("s1")
-    t.changed("s1", ("u", "Rain", ""))
-    assert t.previous_end("s1") == 0          # first track of a page
-    t.record("s1", 0, 10_000)
-    t.changed("s1", ("u", "Mercy Street", ""))
-    assert t.previous_end("s1") == 10_000
-    t.record("s1", 10_000, 376_000)
-    t.changed("s1", ("u", "Next one", ""))
-    assert t.previous_end("s1") == 386_000
-
-
-def test_tracker_new_details_of_the_same_queue_item_keep_its_offset():
-    t = tt.TrackChangeTracker()
-    t.started("s1")
-    t.changed("s1", ("u", "The Spanish train crash", "", ""))
-    t.record("s1", 0, 223_000, item_id="q1")
-    t.changed("s1", ("u", "The Spanish train crash", "", "ABC News Top Stories"))
-    assert t.same_item_offset("s1", "q1") == 0
-    assert t.same_item_offset("s1", "q2") is None
-
-
-def test_tracker_a_track_after_the_pages_first_ends_where_that_one_ends():
-    # MA moved on before the page's first pull: a resume 68 s into a 69 s track
-    t = tt.TrackChangeTracker()
-    t.started("s1", (("First", ""), -68_000, 69_000))
-    t.changed("s1", ("u", "Second", ""))
-    assert t.previous_end("s1") == 1_000 and t.past_start("s1")
-    t.started("s2", (("First", ""), -68_000, 69_000))
-    t.changed("s2", ("new-url", "First", ""))
-    assert t.previous_end("s2") == 0 and not t.past_start("s2")
-
-
-def test_tracker_unknown_duration_breaks_the_chain():
-    t = tt.TrackChangeTracker()
-    t.changed("s1", ("u", "Radio", ""))
-    t.record("s1", 0, None)
-    t.changed("s1", ("u", "Song", ""))
-    assert t.previous_end("s1") is None
-    assert t.previous_end("nope") is None
-
-
-def test_event_position_at_index():
-    assert tt.video_position_ms(["Pause", 61000.4], index=1) == 61000
-    assert tt.video_position_ms(["Play"], index=1) is None
-
-
-def test_page_start_offset():
-    # normal new page: the stream starts with the track
-    assert tt.page_start_offset_ms(300, False, None, 4_000, None) == 0
-    # reopened by our resume at 61 s: video 0 is 61 s into the track
-    assert tt.page_start_offset_ms(300, False, None, 4_000, 61_000) == -61_000
-    # reopened by MA's own resume at 2:34: the stream starts mid-track
-    assert tt.page_start_offset_ms(1_000, False, None, 154_000, None) == -153_000
-    assert tt.page_start_offset_ms(None, False, None, 154_000, None) == -154_000
-    # ... at 9.5 s, where the skill saw MA pause: below the elapsed-time guess
-    assert tt.page_start_offset_ms(1_000, False, None, 12_300, None, 9_569) == -9_569
-    # our own resume wins over MA's pause position
-    assert tt.page_start_offset_ms(300, False, None, 4_000, 61_000, 9_569) == -61_000
-
-
-def test_title_key_ignores_stream_url():
-    a = {"audioSources": "https://h/flow/a/x.mp3", "primaryText": "T", "secondaryText": "A"}
-    b = dict(a, audioSources="https://h/flow/b/x.mp3")
-    assert tt.title_key(a) == tt.title_key(b) == ("T", "A", "")
-    # reopened paused after a screen pause at 61 s
-    assert tt.page_start_offset_ms(0, True, 61_000, 75_000, None) == -61_000
-    # reopened paused by a pause from MA: MA's elapsed time
-    assert tt.page_start_offset_ms(None, True, None, 75_000, None) == -75_000
-
-
 def test_resume_position():
     assert tt.resume_position_s(61_900, 75.0, 229) == 61
     assert tt.resume_position_s(None, 75.6, 229) == 75
@@ -192,53 +55,12 @@ def test_commands_set_slider_when_paused():
     assert len(tt.set_track_time_commands(-34_760, 326_000)) == 12
 
 
-def test_queue_end_only_on_the_last_track():
-    tracker = tt.TrackChangeTracker()
-    tracker.changed("s", ("u", "a", "x"))
-    tracker.record("s", 0, 200_000)
-    assert tracker.queue_end_ms("s") is None
-    tracker.changed("s", ("u", "b", "x"))
-    tracker.record("s", 200_000, 300_000, last=True)
-    assert tracker.queue_end_ms("s") == 500_000
-    tracker.changed("s", ("u", "c", "x"))   # the queue grew: no longer known
-    assert tracker.queue_end_ms("s") is None
-    assert tracker.queue_end_ms("other") is None
-
-
-def test_track_end_except_on_the_last_track():
-    tracker = tt.TrackChangeTracker()
-    tracker.changed("s", ("u", "a", "x"))
-    assert tracker.track_end_ms("s") is None               # not placed yet
-    tracker.record("s", 100_000, 200_000)
-    assert tracker.track_end_ms("s") == 300_000
-    tracker.record("s", 100_000, 200_000, last=True)
-    assert tracker.track_end_ms("s") is None               # the page ends the queue itself
-    assert tracker.track_end_ms("other") is None
-
-
-def test_queue_end_unknown_duration():
-    tracker = tt.TrackChangeTracker()
-    tracker.changed("s", ("u", "radio", ""))
-    tracker.record("s", 0, None, last=True)
-    assert tracker.queue_end_ms("s") is None
-
-
-
 def test_set_track_time_commands_queue_end():
     commands = tt.set_track_time_commands(0, 300_000, queue_end_ms=290_000)
     assert {"type": "SetValue", "componentId": "AudioPlayerRoot",
             "property": "queueEnd", "value": 290_000} in commands
     # not on the last track: cleared, so a page that was on it doesn't stop
     assert tt.set_track_time_commands(0, 300_000)[0]["value"] == 0
-
-
-def test_tracker_page_it_did_not_start_has_no_previous_end():
-    t = tt.TrackChangeTracker()
-    t.changed("taken-on", ("u", "Song", ""))
-    assert t.previous_end("taken-on") is None   # from the video position instead
-    t.started("taken-on")                        # a new stream
-    t.changed("taken-on", ("u", "Song", ""))
-    assert t.previous_end("taken-on") == 0
 
 
 def test_upcoming_commands_after_repeat_or_shuffle():
@@ -255,18 +77,30 @@ def test_upcoming_commands_after_repeat_or_shuffle():
     assert values["queueEnd"] == 290_000 and values["nextDuration"] == -1
 
 
-def test_tracker_set_last():
-    t = tt.TrackChangeTracker()
-    t.changed("s", ("u", "Song", ""))
-    t.record("s", 10_000, 200_000, last=False)
-    assert t.queue_end_ms("s") is None
-    t.set_last("s", True)   # repeat turned off on the last song
-    assert t.queue_end_ms("s") == 210_000
-    t.set_last("unknown", True)   # no page: nothing to do
-
-
 def test_commands_older_pages_lack_come_last():
     cmds = tt.new_page_only_last(tt.set_track_time_commands(0, 215_000, shown_ms=0)
                                  + [{"type": "SetValue", "componentId": "AudioPlayerRoot", "property": "shuffleOn", "value": 1}])
     assert [c["property"] for c in cmds][-6:] == ["shuffleOn", "nextTitleSize", "nextAlbum",
                                                   "nextQuality", "nextItem", "quality"]
+
+
+SINCE = 1_762_140_795.15    # when MA sent the stream
+
+
+def test_a_seek_starts_at_the_skills_place():
+    # repeat one: MA's clock puts the seeked track at 0 when the stream starts
+    assert tt.stream_offset_ms(200_000, SINCE + 0.02, SINCE + 0.01, SINCE, 1) == -200_000
+    assert tt.stream_offset_ms(200_000, SINCE - 200.01, SINCE + 0.01, SINCE, 1) == -200_000
+    assert tt.stream_offset_ms(60_000, None, None, SINCE, 1.5) == -40_000
+
+
+def test_the_next_track_in_the_stream_starts_at_mas_place():
+    # repeat one wraps 31 s into a stream that started 200 s into a 231 s track
+    assert tt.stream_offset_ms(200_000, SINCE + 31.01, SINCE + 31.02, SINCE, 1) == 31_000
+    assert tt.stream_offset_ms(0, SINCE + 231.0, SINCE + 231.01, SINCE, 1) == 231_000
+
+
+def test_a_stream_ma_started_follows_mas_clock():
+    assert tt.stream_offset_ms(None, SINCE - 0.01, SINCE + 0.01, SINCE, 1) == 0
+    assert tt.stream_offset_ms(None, SINCE - 0.01, SINCE - 5, SINCE, 1) is None
+    assert tt.stream_offset_ms(None, None, None, SINCE, 1) is None

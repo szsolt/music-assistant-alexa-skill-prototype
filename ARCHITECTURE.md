@@ -20,11 +20,11 @@ flowchart LR
 
     ECHO -- "voice, button presses" --> AMZ
     AMZ -- "requests (public HTTPS)" --> SKILL
-    SKILL -- "answers: page, page updates" --> AMZ
+    SKILL -- "answers: page, APL page updates" --> AMZ
     AMZ --> ECHO
 
     ECHO -- "audio, cover art" --> STREAM
-    ECHO -- "doorbell: 1 tiny image a second" --> STREAM
+    ECHO -- "HTML page, its reports and updates" --> STREAM
     STREAM -- "/bell/" --> SKILL
     STREAM -- "streams, images" --> MA
 
@@ -33,7 +33,7 @@ flowchart LR
 ```
 
 - **Public:** only the skill endpoint (`SKILL_HOSTNAME`). Amazon calls it for every request.
-- **LAN only:** the stream host (`MA_HOSTNAME`), MA's API (`MA_API_URL`), and the doorbell (`APL_BELL_URL`).
+- **LAN only:** the stream host (`MA_HOSTNAME`), MA's API (`MA_API_URL`), and the HTML page (`HTML_PAGE_URL`).
 - The stream host needs a name with a trusted HTTPS certificate. Its DNS record can exist only on your LAN.
 
 ## Starting the music
@@ -67,12 +67,20 @@ sequenceDiagram
     A->>E: Player page
     E->>M: Fetch the stream and cover art (LAN)
     Note over E,M: The audio flows only now
-    loop every second
-        E->>S: Doorbell image (LAN)
+    loop every second (HTML page)
+        E->>S: Position report (LAN)
     end
 ```
 
 A new Echo pairs itself here. The first unpaired Echo that opens the skill within 10 seconds of MA's stream becomes that MA player's Echo.
+
+## Two player pages
+
+With `HTML_PAGE_URL` set, an Echo that supports it gets the HTML page. The Echo loads it from the skill over the LAN. The page reports to the skill every second, and the skill sends it news over an open event stream.
+
+Older Echos, and setups without `HTML_PAGE_URL`, get the basic APL page. It talks to the skill only through Amazon. It asks for news every couple of seconds.
+
+The HTML page has more: the queue, browsing and lyrics.
 
 ## One stream, many tracks
 
@@ -80,11 +88,50 @@ MA sends the page one long stream: the whole queue, track after track. So a trac
 
 The video doesn't know where one track ends. The skill works that out. When a track starts, it asks MA once for the track's length and sends the page the offset where the track begins in the stream. The page then counts the time on its own. MA gives lengths in whole seconds, so the count can drift. When the page is more than 2 seconds off MA's clock, it resyncs.
 
-The page also knows the next track: its title and cover. At the end of a track, it switches to the next one by itself, without asking anyone. When the next track changes in MA ("play next", shuffle, a rearranged queue), the skill hears it from MA's events. It rings the doorbell, and the page fetches its new next track.
+The page also knows the next track: its title and cover. At the end of a track, it switches to the next one by itself, without asking anyone. When the next track changes in MA ("play next", shuffle, a rearranged queue), the skill hears it from MA's events. It sends the page its new next track.
 
 ## When the page is open
 
 While a page is open, MA doesn't need to make the Echo speak again. For next, previous, a jump in the queue, seek, pause and resume, MA tells the skill and leaves the rest to it. The skill hands the change to the page, and the page stays open.
+
+The HTML page gets the change at once, over the LAN:
+
+```mermaid
+sequenceDiagram
+    participant U as You
+    participant E as Echo Show
+    participant S as Skill
+    participant M as Music Assistant
+
+    U->>M: Next track (MA app, or a button on the page)
+    M->>S: New stream URL, "the page may take it" (LAN)
+    S->>E: The new stream, title, cover (LAN)
+    E->>M: Fetch the new stream (LAN)
+    E->>S: Position report: "I have it" (LAN)
+```
+
+If the page doesn't confirm within 3 seconds, the skill sends the change once more. After 6 seconds, the skill asks MA to send it the spoken way, and a new page opens.
+
+The basic APL page takes the change with its next request for news:
+
+```mermaid
+sequenceDiagram
+    participant E as Echo Show
+    participant A as Amazon
+    participant S as Skill
+    participant M as Music Assistant
+
+    M->>S: New stream URL, "the page may take it" (LAN)
+    E->>A: Request for news
+    A->>S: Request for news
+    S->>A: The new stream, title, cover
+    A->>E: The answer
+    E->>M: Fetch the new stream (LAN)
+```
+
+## Buttons and voice
+
+A button on the HTML page goes to the skill over the LAN. The skill asks MA, and the page shows the result when MA reports the change. A button on the basic APL page, and anything you say, goes through Amazon. For "Alexa, next", the skill waits for MA's new stream and answers with it.
 
 ```mermaid
 sequenceDiagram
@@ -94,30 +141,44 @@ sequenceDiagram
     participant S as Skill
     participant M as Music Assistant
 
-    U->>M: Next track (MA app, or a button on the page)
-    M->>S: New stream URL, "the page may take it" (LAN)
-    E->>S: Doorbell image (LAN)
-    S-->>E: 404: there is news
-    E->>A: Pull
-    A->>S: Pull
-    S->>A: The new stream, title, cover
-    A->>E: The answer
-    E->>M: Fetch the new stream (LAN)
+    alt a button on the HTML page
+        U->>E: Tap next
+        E->>S: Next (LAN)
+        S->>M: Next track (LAN)
+        M->>S: New stream URL, "the page may take it" (LAN)
+        S->>E: The new stream, title, cover (LAN)
+    else voice
+        U->>E: "Alexa, next"
+        E->>A: Next request
+        A->>S: Next request
+        S->>M: Next track (LAN)
+        M->>S: New stream URL (LAN)
+        S->>A: The new stream, the page stays open
+        A->>E: The answer
+    end
 ```
 
-If the page doesn't take the change within 6 seconds, the skill asks MA to send it the spoken way, and a new page opens.
+"Alexa, pause" works like the pause button: the skill remembers where the page was, so play resumes from there.
+
+The page stays open until you say "stop" or "cancel", the queue ends, or you move the music to another player. When MA fails, the skill says so, or the HTML page shows a short notice, and the page stays. While the HTML page waits for an answer it dims. It stops waiting after 10 seconds.
 
 ## The player page
 
 The page shows the cover, title, artist, album, time, and the file's quality. Its buttons are play/pause, previous, next, shuffle, repeat, favourite, and up next. Tapping the cover opens the album.
 
-Every button goes to MA, so MA's queue stays the source of truth. A press travels two ways at once: through Amazon, and over the LAN in the doorbell URL. The first copy to arrive wins, so the LAN copy usually acts about a second sooner.
+The HTML page has more. A moon chip counts down MA's sleep timer. The page shows the next song and, in the playlist sheet, what happens after the queue ends. Audiobooks and podcasts get skip back, skip forward and a speed chip.
 
-## The doorbell
+The menu can show MA's visualiser in place of the cover. MA's MilkDrop visualizer plugin sends the player's waveform. The skill relays it to the page over the event stream, and the page draws it with MilkDrop. Presets too slow for the Echo are skipped, and the page reports them to the skill log.
 
-Without the doorbell, the page asks the skill for news through Amazon. Each answer schedules the next question, so one lost request freezes the screen.
+Every button goes to MA, so MA's queue stays the source of truth.
 
-With `APL_BELL_URL` set, the page reloads a tiny image from the skill once a second, over the LAN. The image's URL carries the page's position, whether it plays, and its last button press. The skill answers with the image while nothing changed. It answers with a 404 when there is news. The page then pulls the news through Amazon. A lost pull only delays the news, because the bell keeps failing until the page has it.
+## Page updates
+
+The HTML page reports its position to the skill every second, over the LAN. The skill sends it news over an open event stream on the LAN, as soon as MA reports a change. When the stream drops, the page reconnects, and the skill sends again what the page hasn't confirmed. When a hand-off goes unconfirmed, the skill's answer to the page's next report asks it to reopen the stream.
+
+A restart of the skill keeps open pages. The skill saves them in its data directory. After the restart, the HTML page reconnects by itself.
+
+The basic APL page asks the skill for news through Amazon every couple of seconds. Each answer schedules the next question.
 
 ## Staying in sync
 
@@ -125,11 +186,11 @@ The Echo and MA can disagree: a page closes, a stream stalls, Alexa breaks off. 
 
 | What goes wrong | How the skill notices | What it does |
 |---|---|---|
-| A new page shows but never plays | No event from it within 10 s. With the doorbell: no bell that says it plays within 20 s | Asks MA to resend the stream |
+| A new page shows but never plays | No event from it within 10 s. An HTML page: no report that says it plays within 20 s | Asks MA to resend the stream |
 | Alexa closes the page on its own ("set volume to 2") | Alexa ends the session with its own error | Asks MA to resend the stream, so the page comes back |
-| The page and MA disagree on playing | The bell's state differs from MA for 2 checks, 5 s apart | Pauses the one that plays |
+| The page and MA disagree on playing | The page's report differs from MA for 2 checks, 5 s apart | Pauses the one that plays |
 | The stream stalls | The page says it plays, but its position stays put for 20 s | Pauses MA |
-| The page closed | No bell and no pull for 30 s | Pauses MA, without speech |
+| The page closed | No report for 30 s | Pauses MA, without speech |
 | MA ended its stream early (it does at a sample-rate change) | The page plays 20 s past the track's end | Asks MA for the next track |
 
 For a player with more than one Echo, a stalled or closed page doesn't pause MA, and the skill doesn't skip or reopen: another Echo may still play it.
@@ -143,7 +204,7 @@ The skill reads your artist, album, playlist and player names from MA once a day
 ## What Amazon sees
 
 - What you say to the skill, and the skill's answers.
-- The page's button presses, and its pulls for news.
+- The basic APL page's button presses, and its requests for news.
 - Your library and player names, in the voice model.
 - The stream and image URLs, but not the audio. It can't fetch them, because they resolve only on your LAN.
 

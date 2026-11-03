@@ -1,5 +1,3 @@
-import threading
-
 import pytest
 
 from skill import sleep_timer as st
@@ -23,23 +21,26 @@ def test_spoken(seconds, words):
     assert st.spoken(seconds) == words
 
 
-def test_timer_runs_out_once():
-    due = threading.Event()
-    st.start("d", 0.01, lambda device_id: due.set())
-    assert due.wait(2)
+def test_timer_runs_out_once(clock):
+    due = []
+    st.start("d", 60, due.append)
+    clock.advance(59)
+    assert due == []
+    clock.advance(1)
+    assert due == ["d"]
     assert not st.cancel("d")
 
 
-def test_new_timer_replaces_the_old_one():
+def test_new_timer_replaces_the_old_one(clock):
     fired = []
-    st.start("d", 0.05, lambda device_id: fired.append("old"))
-    done = threading.Event()
-    st.start("d", 0.1, lambda device_id: (fired.append("new"), done.set()))
-    assert done.wait(2)
+    st.start("d", 60, lambda device_id: fired.append("old"))
+    st.start("d", 120, lambda device_id: fired.append("new"))
+    clock.advance(120)
     assert fired == ["new"]
 
 
-def test_cancelled_timer_does_nothing():
-    st.start("d", 0.05, lambda device_id: pytest.fail("paused"))
+def test_cancelled_timer_does_nothing(clock):
+    st.start("d", 60, lambda device_id: pytest.fail("paused"))
     assert st.cancel("d")
     assert not st.cancel("d")
+    clock.advance(60)

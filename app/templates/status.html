@@ -12,8 +12,6 @@
                 .red { background:#e74c3c; }
                 .row { margin: 8px 0; }
                 .muted { color:#666; font-size:0.9em }
-                .intent-toggle { cursor: pointer; background: transparent; border: none; padding: 0; font-size: 1em }
-                .intent-entry { margin-bottom:12px }
                 .status-box:focus { outline: 2px solid #00A4E3; outline-offset: 2px; }
                 </style>
             </head>
@@ -22,24 +20,15 @@
                 <div class="row">__SKILL_HTML__</div>
                 <div class="row" id="skill-ask-row">__SKILL_ASK_HTML__</div>
                 <div class="row" id="api-row">__MA_API_HTML__</div>
-                <div class="row" id="alexa-row">__ALEXA_API_HTML__</div>
                 <div class="row" id="metadata-row">__METADATA_HTML__</div>
-                <div class="row" id="invocations-row">__INVOCATIONS_HTML__</div>
                 <div class="row" id="voice-row">__VOICE_HTML__</div>
                 <script>
-                // Fetch MA and Alexa checks independently so each row updates when ready
+                // Fetch each check independently so each row updates when ready
                 (function pollMa(){
                     fetch('/status/ma').then(r=>r.json()).then(j=>{
                         try{ const maEl = document.getElementById('api-row'); if(maEl && j.ma_api_html){ maEl.innerHTML = j.ma_api_html; } }catch(e){}
                         setTimeout(pollMa, 3000);
                     }).catch(()=>{ setTimeout(pollMa, 5000); });
-                })();
-
-                (function pollAlexa(){
-                    fetch('/status/alexa').then(r=>r.json()).then(j=>{
-                        try{ const alexaEl = document.getElementById('alexa-row'); if(alexaEl && j.alexa_api_html){ alexaEl.innerHTML = j.alexa_api_html; } }catch(e){}
-                        setTimeout(pollAlexa, 3000);
-                    }).catch(()=>{ setTimeout(pollAlexa, 5000); });
                 })();
 
                 (function pollMetadata(){
@@ -57,15 +46,7 @@
                     }).catch(()=>{ setTimeout(pollAsk, 10000); });
                 })();
 
-                // Poll invocations count so the invocation row updates live
-                (function pollInvocations(){
-                    fetch('/status/invocations').then(r=>r.json()).then(j=>{
-                        try{ const invEl = document.getElementById('invocations-row'); if(invEl && j.invocations_html){ invEl.innerHTML = j.invocations_html; } }catch(e){}
-                        setTimeout(pollInvocations, 3000);
-                    }).catch(()=>{ setTimeout(pollInvocations, 5000); });
-                })();
-
-                // Delegated click handler to toggle intent payload/response pairs
+                // A click on a status box focuses it, for Ctrl/Cmd+A below.
                 document.addEventListener('click', function(e){
                     try{
                         var t = e.target || e.srcElement;
@@ -73,12 +54,6 @@
                             var box = t.closest('pre.status-box');
                             if(box && box.focus){
                                 box.focus();
-                            }
-                        }
-                        if(t && t.classList && t.classList.contains('intent-toggle')){
-                            var pair = t.nextElementSibling;
-                            if(pair && pair.classList && pair.classList.contains('intent-pair')){
-                                pair.style.display = (pair.style.display === 'none' || pair.style.display === '') ? 'block' : 'none';
                             }
                         }
                     }catch(err){}

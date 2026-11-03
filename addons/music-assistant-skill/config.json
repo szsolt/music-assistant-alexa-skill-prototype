@@ -26,6 +26,8 @@
     "PORT": 5000,
     "DEBUG_PORT": 5678,
     "LOCALE": "en-US",
+    "ENABLE_APL": false,
+    "HTML_PAGE_URL": "",
     "AWS_DEFAULT_REGION": "us-east-1",
     "TZ": "America/Chicago"
   },
@@ -37,6 +39,8 @@
     "PORT": "int",
     "DEBUG_PORT": "int",
     "LOCALE": "str",
+    "ENABLE_APL": "bool",
+    "HTML_PAGE_URL": "str",
     "AWS_DEFAULT_REGION": "str",
     "TZ": "str"
   },

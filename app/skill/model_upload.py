@@ -20,7 +20,8 @@ import os
 import time
 
 from env_secrets import get_env_secret
-from . import voice_model
+from . import config
+from .voice import model as voice_model
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +40,7 @@ def configured():
 
 
 def _state_path():
-    mapping = os.environ.get("DEVICE_MAPPING_PATH", "/app/instance_data/device_players.json")
-    return os.path.join(os.path.dirname(mapping), "voice_upload.json")
+    return config.data_path("voice_upload.json")
 
 
 def _uploaded():
@@ -109,8 +109,8 @@ def _wait_for_build(client, skill_id, locale):
     raise UploadFailed(f"{locale} build didn't finish in {BUILD_TIMEOUT_S} s")
 
 
-def upload(voice_types):
-    """Upload voice_types ({"hash", "types"} from voice_lists) if they changed.
+def upload(voice_types, client=None):
+    """Upload voice_types ({"hash", "types"} from voice.lists) if they changed, through client (default Amazon's).
 
     Returns the locales uploaded, [] if nothing needed it, None if not configured.
     """
@@ -122,7 +122,7 @@ def upload(voice_types):
     key = _key(voice_types)
     uploaded = _uploaded()
     skill_id = os.environ["SKILL_ID"]
-    client = _client()
+    client = client or _client()
     done, failed = [], []
     try:
         locales = _locales(client, skill_id)

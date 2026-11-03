@@ -89,8 +89,7 @@ Notes:
 | `ENABLE_APL` | No | `false` | Enable rich APL rendering (cover art, title, on-screen playback controls) on Echo Show and other APL-capable devices, instead of the plain AudioPlayer-only flow. Disabled by default for playback stability; set to `true` to opt back into screen rendering and live metadata refresh on supported devices. |
 | `MA_API_URL` | *No | — | ***REQUIRED** for voice-controlled Next/Previous. Base URL of the Music Assistant WebSocket API (e.g. `https://music.example.com`), used to send `next_track`/`previous_track` commands to the MA player paired with the requesting Echo (see [Device Mapping](#device-mapping) below). |
 | `MA_API_TOKEN` | *No | — | ***REQUIRED** alongside `MA_API_URL` if your MA server enforces auth (schema >= 28). A long-lived token created via MA's own auth flow (`auth/token/create`). Can be provided as a Docker secret the same way as `APP_PASSWORD`. |
-| `APL_BELL_URL` | No | — | The player page's doorbell, for fast and reliable screen updates over the LAN (example: `https://ma.example.com/bell/`). Your reverse proxy must send this path to the skill. Without it, the page asks for updates through Amazon. See [The doorbell](ARCHITECTURE.md#the-doorbell). |
-
+| `HTML_PAGE_URL` | No | — | Shows the HTML player page on Echos that support it (example: `https://ma.example.com/bell/html/`). It can be LAN-only. Your reverse proxy must send `/bell/` to the skill. Without it, Echos with a screen get the basic APL page. See [Player page](#player-page). |
 | `LWA_CLIENT_ID`, `LWA_CLIENT_SECRET`, `LWA_REFRESH_TOKEN` | No | — | Lets the skill upload the voice-command model (your library's names) to Amazon by itself, once a day when the library changed. See [Voice commands](#voice-commands). Can be Docker secrets like `APP_PASSWORD`. |
 
 **Secrets and persistence**
@@ -121,18 +120,33 @@ To upload them automatically:
 
 Without them, the status page links the model for each language. Paste it into the developer console's JSON editor (Build > Interaction Model > JSON Editor) and build. Check the invocation name before you save.
 
+### Player page
+
+On an Echo with a screen, the skill shows a player page. With `HTML_PAGE_URL` set, Echos that support it get the HTML page. Older Echos, and setups without it, get a basic APL page.
+
+- The HTML page shows changes from MA at once.
+- "Alexa, pause" works like the page's pause button. Play resumes from the same spot.
+- The page stays open until you say "stop" or "cancel", the queue ends, or you move the music to another player. Errors are spoken, or shown on the HTML page, and the page stays.
+- A restart of the skill keeps open pages.
+- When a button gets no answer, the page stops waiting after 10 seconds.
+- The HTML page shows MA's sleep timer, the next song, and what happens after the queue ends.
+- Audiobooks and podcasts get skip back, skip forward and a speed chip, as in MA's app.
+- The menu can show MA's visualiser in place of the cover. It needs MA's MilkDrop visualizer plugin and `MA_API_URL`.
+
 ## Basic Troubleshooting
 ### Status Page
 `/status`
 
 Returns a simple status page showing the local API health and an ASK CLI driven check for whether the Music Assistant skill exists, whether its endpoint matches `SKILL_HOSTNAME`, and whether testing is enabled. When the check is not green, the status page provides a quick link to `/setup`.
 
+The `/invocations` page is gone. The skill's log shows its requests instead.
+
 ### Device Mapping
 `/devices`
 
 Alexa's Custom Skill API only exposes an opaque, per-skill device id in each request — there is no way to resolve it to a friendly device name or to a Music Assistant player. This page lets you pair each Echo's device id with the corresponding MA `player_id` so voice-controlled Next/Previous can be routed to the right player. To pair a new device: trigger any voice command from it (e.g. "next"), reload this page (it lists every device id seen in the current session), then enter the matching MA player_id.
 
-Only Next/Previous are routed to MA this way. Pause/Stop/Resume intentionally still control Alexa's own AudioPlayer directly rather than the MA player: for the `alexa` MA player provider, those commands are implemented by speaking the phrase back into the device via `alexapy`, which would re-trigger the same Alexa intent on this skill and loop.
+Voice commands such as next, previous, pause and resume go to the paired MA player.
 
 ### TLS Support
 TLS 1.3 is not supported

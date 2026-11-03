@@ -1,47 +1,54 @@
 import pytest
 
-apl = pytest.importorskip("skill.apl")
+render = pytest.importorskip("skill.page.apl.render")
 
 
-@pytest.fixture(autouse=True)
-def no_buttons(monkeypatch):
-    monkeypatch.setattr(apl, "_start_buttons", None)
+class _Builder:
+    def __init__(self):
+        self.directives = []
+
+    def add_directive(self, directive):
+        self.directives.append(directive)
 
 
-def test_start_values_from_the_skill(monkeypatch):
-    monkeypatch.setattr(apl, "_start_track_time", lambda device_id: (-65_000, 201_000))
-    assert apl._start_values("d") == {"startOffset": -65_000, "startDuration": 201_000}
+def _start_values(device_id):
+    """The start values of the page the skill builds now for device_id."""
+    builder = _Builder()
+    render.start(builder, device_id)
+    item = builder.directives[0].document["mainTemplate"]["items"][0]
+    return {key: value for key, value in item.items() if key.startswith("start")}
 
 
-def test_no_start_values_without_device_or_answer(monkeypatch):
-    monkeypatch.setattr(apl, "_start_track_time", lambda device_id: None)
-    assert apl._start_values("d") == {}
-    assert apl._start_values(None) == {}
-
-    def broken(device_id):
-        raise RuntimeError("MA down")
-    monkeypatch.setattr(apl, "_start_track_time", broken)
-    assert apl._start_values("d") == {}
+@pytest.fixture
+def den(skill, ma, store):
+    """Echo d plays MA player Den."""
+    from skill import devices
+    devices.set_player_for_device("d", "Den")
+    store.save({"playerId": "Den", "streamUrl": "https://ma.example/flow/1.mp3", "title": "Kicsi, gyere velem"})
 
 
-def test_start_values_carry_the_button_states(monkeypatch):
-    monkeypatch.setattr(apl, "_start_track_time", lambda device_id: None)
-    monkeypatch.setattr(apl, "_start_buttons", lambda device_id: {"shuffleOn": 1, "repeatMode": 2, "songFavorite": True})
-    assert apl._start_values("d") == {"startShuffleOn": 1, "startRepeatMode": 2, "startSongFavorite": 1}
+def test_a_new_page_starts_with_mas_track_time_and_button_states(den):
+    assert _start_values("d") == {"startOffset": -61_000, "startDuration": 192_000, "startShuffleOn": 0,
+                                  "startRepeatMode": 0, "startSongFavorite": 0, "startAlbumFavorite": 1}
 
-    def broken(device_id):
-        raise RuntimeError("MA down")
-    monkeypatch.setattr(apl, "_start_buttons", broken)
-    monkeypatch.setattr(apl, "_start_track_time", lambda device_id: (0, 1_000))
-    assert apl._start_values("d") == {"startOffset": 0, "startDuration": 1_000}
+
+def test_a_page_without_a_paired_player_has_no_start_values(den):
+    assert _start_values("unpaired") == {}
+    assert _start_values(None) == {}
 
 
 def test_the_page_binds_its_buttons_to_the_start_values():
-    import json, pathlib
-    document = json.loads((pathlib.Path(apl.__file__).parent / "apl_document.json").read_text())
+    document = render.document()
     layout = document["layouts"]["AudioPlayer"]
     params = {p["name"]: p for p in layout["parameters"]}
     binds = {b["name"]: b["value"] for b in layout["item"][0]["bind"]}
     for name in ("shuffleOn", "repeatMode", "songFavorite", "albumFavorite"):
         start = "start" + name[0].upper() + name[1:]
         assert params[start]["default"] == -1 and binds[name] == "${%s}" % start
+
+
+def test_a_page_opens_without_start_values_when_reading_them_fails(den, monkeypatch):
+    def broken(device_id):
+        raise RuntimeError("positions")
+    monkeypatch.setattr(render.view, "now", broken)
+    assert _start_values("d") == {}

@@ -35,24 +35,6 @@ msgstr ""
 msgid "Sorry, I could not understand what you've just said."
 msgstr "Entschuldigung, ich konnte nicht verstehen, was du gesagt hast."
 
-#: alexa/data.py:9
-msgid "This is radio, you have to wait for next track to play."
-msgstr ""
-"Du hörst Radio — du musst auf den nächsten Titel warten, bis er abgespielt "
-"wird."
-
-#: alexa/data.py:10
-msgid "Resuming {}"
-msgstr "Setze {} fort"
-
-#: alexa/data.py:11
-msgid ""
-"This is radio, you can not do that.  You can ask me to stop or pause to "
-"stop listening."
-msgstr ""
-"Du hörst Radio — das ist nicht möglich.  Bitte sage ‚Stopp‘ oder ‚Pause‘, um "
-"die Wiedergabe zu beenden."
-
 #: alexa/data.py:12
 msgid "Goodbye."
 msgstr "Auf Wiedersehen."

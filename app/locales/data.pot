@@ -31,20 +31,6 @@ msgstr ""
 msgid "Sorry, I could not understand what you've just said."
 msgstr ""
 
-#: alexa/data.py:9
-msgid "This is radio, you have to wait for next track to play."
-msgstr ""
-
-#: alexa/data.py:10
-msgid "Resuming {0}"
-msgstr ""
-
-#: alexa/data.py:11
-msgid ""
-"This is radio, you can not do that.  You can ask me to stop or pause to "
-"stop listening."
-msgstr ""
-
 #: alexa/data.py:12
 msgid "Goodbye."
 msgstr ""
@@ -60,4 +46,3 @@ msgstr ""
 #: alexa/data.py:16
 msgid "test with parameters {0} and {1}"
 msgstr ""
-

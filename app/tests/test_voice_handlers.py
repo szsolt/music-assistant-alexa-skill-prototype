@@ -1,354 +1,301 @@
+import json
 import os
-from types import SimpleNamespace as NS
 
 import pytest
 
 pytest.importorskip("ask_sdk_core")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")    # the skill makes AWS clients on import
 
-from ask_sdk_core.response_helper import ResponseFactory
+from music_assistant_models.enums import PlaybackState
 
-from skill import lambda_function as lf
-from skill import live_page as lp
-
-
-def _slot(value, resolved=None):
-    resolutions = None
-    if resolved:
-        resolutions = NS(resolutions_per_authority=[NS(
-            status=NS(code=NS(value="ER_SUCCESS_MATCH")), values=[NS(value=NS(name=resolved))])])
-    return NS(value=value, resolutions=resolutions)
-
-
-def _input(intent, slots=None):
-    request = NS(object_type="IntentRequest", intent=NS(name=intent, slots=slots or {}))
-    envelope = NS(request=request, context=NS(system=NS(device=NS(device_id="d"))))
-    attributes = NS(request_attributes={"_": lambda s: s, "supports_apl": True})
-    return NS(request_envelope=envelope, attributes_manager=attributes, response_builder=ResponseFactory())
+from skill import devices, sleep_timer
+from skill.alexa import handlers
+from skill.ma import library, player
+from skill import echo as echos
+from skill import handoff, watch
+from skill.page.html import channel
 
 
 @pytest.fixture
-def page(monkeypatch):
-    """An open player page on device d."""
+def page(echo, monkeypatch):
+    """Echo d shows an open player page. Yields Echo d."""
     monkeypatch.setenv("ENABLE_APL", "true")
-    monkeypatch.setattr(lf.bell, "has_page", lambda device_id: True)
-    lp._last_event.clear()
-    lp.heard_from("d")
-    yield
-    lp.closed("d")
+    handoff.heard_from("d")
+    yield echo("d", "apl")
+    handoff.closed("d")
 
 
 def test_unknown_request_keeps_the_open_page_quietly(page):
-    response = lf.UnhandledIntentHandler().handle(_input("AMAZON.FallbackIntent"))
-    assert response.output_speech is None and response.should_end_session is None
+    response = page.intent("AMAZON.FallbackIntent")
+    assert "outputSpeech" not in response and "shouldEndSession" not in response
 
 
-def test_unknown_request_without_a_page_says_so():
-    lp._last_event.clear()
-    response = lf.UnhandledIntentHandler().handle(_input("AMAZON.FallbackIntent"))
-    assert response.output_speech is not None and response.should_end_session is True
+def test_unknown_request_without_a_page_says_so(echo):
+    response = echo("d", "none").intent("AMAZON.FallbackIntent")
+    assert "outputSpeech" in response and response["shouldEndSession"] is True
 
 
 def test_forced_voice_command_does_nothing(page, monkeypatch):
-    monkeypatch.setattr(lf.ma_voice, "find", lambda *a: pytest.fail("searched MA"))
+    monkeypatch.setattr(library, "find", lambda *a: pytest.fail("searched MA"))
     # "turn off lamp": Alexa's queue command, with no kind word.
-    response = lf.VoicePlayHandler().handle(_input("Queue", {"kind": _slot(None), "name": _slot("off lamp")}))
-    assert response.output_speech is None and response.should_end_session is None
-
-
-def _session_ended(error_type=None):
-    from ask_sdk_model.session_ended_error import SessionEndedError
-    from ask_sdk_model.session_ended_error_type import SessionEndedErrorType
-    error = SessionEndedError(message="x", object_type=SessionEndedErrorType(error_type)) if error_type else None
-    handler_input = _input("unused")
-    handler_input.request_envelope.request = NS(object_type="SessionEndedRequest", reason=None, error=error)
-    return handler_input
+    response = page.intent("Queue", kind=None, name="off lamp")
+    assert "outputSpeech" not in response and "shouldEndSession" not in response
 
 
 @pytest.fixture
-def reopen(monkeypatch):
-    """MA plays on player p, paired with Echo d only; timers fire at once. Yields the resumed Echos."""
+def reopen(ma, echo, monkeypatch):
+    """MA plays on Den, paired with Echo d only. Yields Echo d, with a screen."""
     monkeypatch.setenv("ENABLE_APL", "true")
-    monkeypatch.setattr(lf.threading, "Timer", lambda delay, fn: NS(daemon=False, start=fn))
-    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "p")
-    monkeypatch.setattr(lf.device_mapping, "get_devices_for_player", lambda player_id: ["d"])
-    monkeypatch.setattr(lf.ma_control, "get_queue_state", lambda player_id: ("playing", 61000))
-    monkeypatch.setattr(lf.bell, "has_page", lambda device_id: True)   # the closed page, until swept
-    lp._last_event.clear()
-    resumed = []
-    monkeypatch.setattr(lf, "_resume_for", lambda device_id, position_ms: resumed.append((device_id, position_ms)) or "ok")
-    lf._reopened_at.clear()
-    yield resumed
-    lf._reopened_at.clear()
+    devices.set_player_for_device("d", "Den")
+    return echo("d", "apl")
 
 
-def test_page_alexa_closed_comes_back_once_a_minute(reopen):
-    lf.SkillEventHandler().handle(_session_ended("INTERNAL_SERVICE_ERROR"))
-    assert reopen == [("d", 61000)]                                # where MA is now
-    lf.SkillEventHandler().handle(_session_ended("INTERNAL_SERVICE_ERROR"))
-    assert reopen == [("d", 61000)]
+def _resends(ma):
+    return [call for call in ma.calls if call[0] == "seek"]
 
 
-def test_page_closed_by_hand_or_by_a_skill_error_stays_closed(reopen):
-    lf.SkillEventHandler().handle(_session_ended())
-    lf.SkillEventHandler().handle(_session_ended("INVALID_RESPONSE"))
-    assert reopen == []
+def test_page_alexa_closed_comes_back_once_a_minute(reopen, ma, clock):
+    reopen.session_ended("INTERNAL_SERVICE_ERROR")
+    assert _resends(ma) == []
+    clock.advance(watch.REOPEN_DELAY_S)
+    assert _resends(ma) == [("seek", "den", 61)]                # where MA is now
+    reopen.session_ended("INTERNAL_SERVICE_ERROR")
+    clock.advance(watch.REOPEN_DELAY_S)
+    assert len(_resends(ma)) == 1
 
 
-def test_page_alexa_closed_stays_closed_when_ma_has_stopped(reopen, monkeypatch):
-    monkeypatch.setattr(lf.ma_control, "get_queue_state", lambda player_id: ("paused", 0))
-    lf.SkillEventHandler().handle(_session_ended("INTERNAL_SERVICE_ERROR"))
-    assert reopen == []
+def test_page_closed_by_hand_or_by_a_skill_error_stays_closed(reopen, ma, clock):
+    reopen.session_ended()
+    reopen.session_ended("INVALID_RESPONSE")
+    clock.advance(watch.REOPEN_DELAY_S)
+    assert _resends(ma) == []
+
+
+def test_page_alexa_closed_stays_closed_when_ma_has_stopped(reopen, ma, clock):
+    ma.pause()
+    reopen.session_ended("INTERNAL_SERVICE_ERROR")
+    clock.advance(watch.REOPEN_DELAY_S)
+    assert _resends(ma) == []
     # Not counted as a reopen: a later close while MA plays still reopens.
-    monkeypatch.setattr(lf.ma_control, "get_queue_state", lambda player_id: ("playing", 0))
-    lf.SkillEventHandler().handle(_session_ended("INTERNAL_SERVICE_ERROR"))
-    assert reopen == [("d", 0)]
+    ma.queue.state = PlaybackState.PLAYING
+    reopen.session_ended("INTERNAL_SERVICE_ERROR")
+    clock.advance(watch.REOPEN_DELAY_S)
+    assert _resends(ma) == [("seek", "den", 61)]
 
 
-def test_page_alexa_closed_stays_closed_for_a_shared_player_or_a_new_page(reopen, monkeypatch):
-    monkeypatch.setattr(lf.device_mapping, "get_devices_for_player", lambda player_id: ["d", "e"])
-    lf.SkillEventHandler().handle(_session_ended("INTERNAL_SERVICE_ERROR"))
-    monkeypatch.setattr(lf.device_mapping, "get_devices_for_player", lambda player_id: ["d"])
-    monkeypatch.setattr(lf.threading, "Timer", lambda delay, fn: NS(daemon=False, start=lambda: (lp.heard_from("d"), fn())))
-    lf.SkillEventHandler().handle(_session_ended("INTERNAL_SERVICE_ERROR"))
-    lp._last_event.clear()
-    assert reopen == []
+def test_page_alexa_closed_stays_closed_for_a_shared_player_or_a_new_page(reopen, ma, clock):
+    devices.set_player_for_device("e", "Den")
+    reopen.session_ended("INTERNAL_SERVICE_ERROR")
+    clock.advance(watch.REOPEN_DELAY_S)
+    devices.save_mapping({"d": "Den"})
+    reopen.session_ended("INTERNAL_SERVICE_ERROR")
+    handoff.heard_from("d")                                            # a new page came meanwhile
+    clock.advance(watch.REOPEN_DELAY_S)
+    assert _resends(ma) == []
 
 
 @pytest.fixture
 def move(page, monkeypatch):
     """Echo d plays MA player p; the kitchen and a lamp can take the music. Yields the moves MA got."""
-    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "p")
-    monkeypatch.setattr(lf.ma_voice, "players", lambda: [("p", "Here"), ("k", "Kitchen"), ("l", "Lamp")])
+    devices.set_player_for_device("d", "p")
+    monkeypatch.setattr(player, "players", lambda: [("p", "Here"), ("k", "Kitchen"), ("l", "Lamp")])
     moves = []
-    monkeypatch.setattr(lf.ma_voice, "move", lambda player_id, target_id: moves.append((player_id, target_id)))
+    monkeypatch.setattr(player, "move", lambda player_id, target_id: moves.append((player_id, target_id)))
     yield moves
 
 
-def test_move_sends_the_music_on_and_closes_this_page(move):
-    response = lf.MoveMusicHandler().handle(_input("MoveMusic", {"player": _slot("kitchen", "Kitchen")}))
+def test_move_sends_the_music_on_and_closes_this_page(move, page):
+    response = page.intent("MoveMusic", player=("kitchen", "Kitchen"))
     assert move == [("p", "k")]
-    assert "Kitchen" in response.output_speech.ssml and response.should_end_session is True
-    assert [d.object_type for d in response.directives] == ["AudioPlayer.Stop"]
-    assert not lp.is_live("d") and lp.takes_silent_pause("d")  # MA's pause for d: no hand-off, no speech
+    assert "Kitchen" in response["outputSpeech"]["ssml"] and response["shouldEndSession"] is True
+    assert [d["type"] for d in response["directives"]] == ["AudioPlayer.Stop"]
+    assert not handoff.is_live("d") and handoff.takes_silent_pause("d")  # MA's pause for d: no hand-off, no speech
 
 
-def test_move_to_an_unknown_player_keeps_playing_here(move):
-    response = lf.MoveMusicHandler().handle(_input("MoveMusic", {"player": _slot("garage")}))
+def test_move_to_an_unknown_player_keeps_playing_here(move, page):
+    response = page.intent("MoveMusic", player="garage")
     assert move == []
-    assert "garage" in response.output_speech.ssml and response.should_end_session is not True
+    assert "garage" in response["outputSpeech"]["ssml"] and response.get("shouldEndSession") is not True
 
 
-def test_move_to_the_player_already_playing_says_so(move):
-    response = lf.MoveMusicHandler().handle(_input("MoveMusic", {"player": _slot("here", "Here")}))
-    assert move == [] and "already" in response.output_speech.ssml
+def test_move_to_the_player_already_playing_says_so(move, page):
+    response = page.intent("MoveMusic", player=("here", "Here"))
+    assert move == [] and "already" in response["outputSpeech"]["ssml"]
 
 
 def test_like_something_other_than_song_album_artist_does_nothing(page, monkeypatch):
-    monkeypatch.setattr(lf.ma_voice, "set_favorite", lambda *a: pytest.fail("changed a favourite"))
-    response = lf.FavoriteHandler().handle(_input("AddFavorite", {"what": _slot("Queen")}))
-    assert response.output_speech is None and response.should_end_session is None
-
-
-def test_a_new_page_gets_the_button_states_ma_gives_in_time(monkeypatch):
-    import threading
-    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "p")
-    monkeypatch.setattr(lf.ma_voice, "modes", lambda player_id: {"shuffle": True, "repeat": "one"})
-    monkeypatch.setattr(lf.ma_voice, "favorites", lambda player_id: {"song": True, "album": None})
-    assert lf._start_buttons("d") == {"shuffleOn": 1, "repeatMode": 2, "songFavorite": 1, "albumFavorite": -1}
-    # MA slow with the favourites: the page gets the modes now, the hearts at its first refresh.
-    slow = threading.Event()
-    monkeypatch.setattr(lf, "START_BUTTONS_S", 0.05)
-    monkeypatch.setattr(lf.ma_voice, "favorites", lambda player_id: slow.wait(2) or {})
-    try:
-        assert lf._start_buttons("d") == {"shuffleOn": 1, "repeatMode": 2}
-    finally:
-        slow.set()
-
-
-def test_a_failed_button_state_leaves_the_others(monkeypatch):
-    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "p")
-    monkeypatch.setattr(lf.ma_voice, "modes", lambda player_id: {"shuffle": False, "repeat": "off"})
-
-    def broken(player_id):
-        raise KeyError("song")
-    monkeypatch.setattr(lf.ma_voice, "favorites", broken)
-    assert lf._start_buttons("d") == {"shuffleOn": 0, "repeatMode": 0}
+    monkeypatch.setattr(library, "favorite_playing", lambda *a: pytest.fail("changed a favourite"))
+    response = page.intent("AddFavorite", what="Queen")
+    assert "outputSpeech" not in response and "shouldEndSession" not in response
 
 
 @pytest.fixture
 def sleep(monkeypatch):
     """Echo d plays MA player p. Yields the timers the skill started."""
-    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "p")
+    devices.set_player_for_device("d", "p")
     started = []
-    monkeypatch.setattr(lf.sleep_timer, "start", lambda device_id, seconds, on_due: started.append((device_id, seconds)))
+    monkeypatch.setattr(sleep_timer, "start", lambda device_id, seconds, on_due: started.append((device_id, seconds)))
     yield started
 
 
-def test_sleep_timer_starts_and_says_when(sleep):
-    response = lf.SleepTimerHandler().handle(_input("SleepTimer", {"duration": _slot("PT1H30M")}))
+def test_sleep_timer_starts_and_says_when(sleep, echo):
+    response = echo("d", "none").intent("SleepTimer", duration="PT1H30M")
     assert sleep == [("d", 5400)]
-    assert "1 hour and 30 minutes" in response.output_speech.ssml
+    assert "1 hour and 30 minutes" in response["outputSpeech"]["ssml"]
 
 
-def test_sleep_timer_without_a_length_asks_for_one(sleep):
-    response = lf.SleepTimerHandler().handle(_input("SleepTimer", {"duration": _slot(None)}))
-    assert sleep == [] and "How long" in response.output_speech.ssml
+def test_sleep_timer_without_a_length_asks_for_one(sleep, echo):
+    response = echo("d", "none").intent("SleepTimer", duration=None)
+    assert sleep == [] and "How long" in response["outputSpeech"]["ssml"]
 
 
-def test_cancel_sleep_timer_says_if_there_was_none(monkeypatch):
-    monkeypatch.setattr(lf.sleep_timer, "cancel", lambda device_id: False)
-    response = lf.CancelSleepTimerHandler().handle(_input("CancelSleepTimer"))
-    assert "no sleep timer" in response.output_speech.ssml
+def test_cancel_sleep_timer_says_if_there_was_none(monkeypatch, echo):
+    monkeypatch.setattr(sleep_timer, "cancel", lambda device_id: False)
+    response = echo("d", "none").intent("CancelSleepTimer")
+    assert "no sleep timer" in response["outputSpeech"]["ssml"]
 
 
-@pytest.mark.parametrize("sent, paused, said", [(False, True, True), (True, True, False), (False, False, False)])
-def test_play_is_someones_only_when_ma_is_paused_and_sent_nothing(monkeypatch, sent, paused, said):
-    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "p")
-    monkeypatch.setattr(lf.ma_control, "is_paused", lambda player_id: paused)
-    import shared_store
-    monkeypatch.setattr(shared_store, "sent_since", lambda player_id, seconds: sent)
-    assert lf._said_play("d") is said
-
-
-def test_said_play_resumes_ma_on_the_open_page(monkeypatch):
-    monkeypatch.setattr(lf.device_mapping, "is_another_echos_stream", lambda *a: False)
-    monkeypatch.setattr(lf, "_said_play", lambda device_id: True)
-    resumed = object()
-    monkeypatch.setattr(lf, "_stream_reply", lambda handler_input, send: resumed)
-    assert lf.LaunchRequestOrPlayAudioHandler().handle(_input("PlayAudio")) is resumed
-
-
-def test_open_does_not_play_another_players_stream(monkeypatch):
-    monkeypatch.setattr(lf.device_mapping, "is_another_echos_stream", lambda *a: False)
-    monkeypatch.setattr(lf, "_resume_through_ma", lambda handler_input: "failed")
-    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "den")
-    import shared_store
-    monkeypatch.setattr(shared_store, "_store", {"playerId": "kitchen", "streamUrl": "https://x/kitchen.mp3"})
-    played = []
-    monkeypatch.setattr(lf.util, "play", lambda **kwargs: played.append(kwargs))
-    launch = _input(None)
-    launch.request_envelope.request.object_type = "LaunchRequest"
-    response = lf.LaunchRequestOrPlayAudioHandler().handle(launch)
-    assert played == [] and "nothing to play" in response.output_speech.ssml
-
-
-def test_watchdog_waits_longer_for_a_page_with_a_bell_and_stops_when_it_plays(monkeypatch):
-    # After an idle night the Show can hold a page's image loads, bell included, for ~10 s
-    # while its video already plays.
-    timers = []
-
-    class Timer:
-        def __init__(self, wait, fn):
-            self.wait, self.cancelled = wait, False
-            timers.append(self)
-
-        def start(self):
-            pass
-
-        def cancel(self):
-            self.cancelled = True
-
-    monkeypatch.setattr(lf.threading, "Timer", Timer)
-    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "p")
-    monkeypatch.setattr(lf.bell, "has_page", lambda device_id: device_id == "with-bell")
-    lf._watch_page("no-bell")
-    lf._watch_page("with-bell")
-    assert [t.wait for t in timers] == [lf._PAGE_WATCHDOG_S, lf._BELL_PAGE_WATCHDOG_S]
-    lf._page_plays("with-bell")
-    assert timers[1].cancelled and "with-bell" not in lf._page_watch
-    lf._page_plays("no-bell")
-
-
-@pytest.fixture
-def html_launch(monkeypatch):
-    """Echo d opens the skill and gets the HTML page. Yields what happened, in order."""
+@pytest.mark.parametrize("sent, paused", [(True, True), (False, False)])
+def test_play_leaves_ma_alone_when_it_sent_a_stream_or_plays(ma, echo, monkeypatch, sent, paused):
     monkeypatch.setenv("ENABLE_APL", "true")
-    monkeypatch.setattr(lf.device_mapping, "is_another_echos_stream", lambda *a: False)
-    monkeypatch.setattr(lf, "_watch_page", lambda device_id: None)
-    order = []
-
-    def add_apl(builder, start_paused, device_id):
-        order.append(("page", start_paused))
-        builder.add_directive(lf.html_page.start_directive("p1"))
-    monkeypatch.setattr(lf.apl, "add_apl", add_apl)
-    lp._last_event.clear()
-    lf.html_page.want(True)
-    launch = _input(None)
-    launch.request_envelope.request.object_type = "LaunchRequest"
-    yield launch, order
-    lf.html_page.want(False)
-    lp.closed("d")
+    devices.set_player_for_device("d", "Den")
+    if paused:
+        ma.pause()
+    from skill import store
+    monkeypatch.setattr(store, "sent_since", lambda player_id, seconds: sent)
+    handoff.heard_from("d")
+    echo("d", "apl").intent("PlayAudio")
+    handoff.closed("d")
+    assert not [call for call in ma.calls if call[0] in ("seek", "play", "resume")]
 
 
-def test_open_sends_the_html_page_before_ma_resumes(html_launch, monkeypatch):
-    launch, order = html_launch
-    monkeypatch.setattr(lf, "_resume_through_ma", lambda handler_input: order.append(("resume", lp.is_live("d"))) or "ok")
-    response = lf.LaunchRequestOrPlayAudioHandler().handle(launch)
-    assert order == [("page", True), ("resume", True)]
-    assert len(response.directives) == 1 and response.should_end_session is None
+def test_said_play_resumes_ma_on_the_open_page(ma, echo, monkeypatch):
+    monkeypatch.setenv("ENABLE_APL", "true")
+    devices.set_player_for_device("d", "Den")
+    ma.pause()
+    handoff.heard_from("d")
+    response = echo("d", "apl").intent("PlayAudio")
+    assert [call for call in ma.calls if call[0] == "seek"] == [("seek", "den", 61)]
+    assert [d["type"] for d in response["directives"]] == ["Alexa.Presentation.APL.RenderDocument"]
+    assert ma.pushed[-1]["streamUrl"] in json.dumps(response)
+    handoff.closed("d")
 
 
-def test_open_without_ma_resume_drops_the_html_page(html_launch, monkeypatch):
-    launch, order = html_launch
-    monkeypatch.setattr(lf, "_resume_through_ma", lambda handler_input: "failed")
-    monkeypatch.setattr(lf.device_mapping, "is_other_players_stream", lambda *a: True)
-    response = lf.LaunchRequestOrPlayAudioHandler().handle(launch)
-    assert not response.directives and "nothing to play" in response.output_speech.ssml
-    assert not lp.is_live("d")
+def test_open_does_not_play_another_players_stream(ma, echo, store):
+    ma.queue.current_item = None
+    devices.set_player_for_device("d", "Den")
+    store.save({"playerId": "Kitchen", "streamUrl": "http://ma/flow/kitchen.mp3"})
+    response = echo("d", "none").launch()
+    assert not response.get("directives") and "nothing to play" in response["outputSpeech"]["ssml"]
 
 
-def _renew(page_id):
-    renew = _input(None)
-    renew.request_envelope.request = NS(object_type="Alexa.Presentation.HTML.Message", message={"renew": page_id})
-    return renew
+def test_open_does_not_play_the_stream_another_echo_played(ma, echo, store, monkeypatch):
+    monkeypatch.setenv("MA_HOSTNAME", "music.example")
+    monkeypatch.setenv("SKIP_URL_VALIDATION", "true")
+    ma.queue.current_item = None
+    devices.set_player_for_device("d", "Den")
+    devices.set_player_for_device("k", "Kitchen")
+    store.save({"playerId": "Kitchen", "streamUrl": "http://ma/flow/kitchen.mp3"})
+    assert "kitchen.mp3" in json.dumps(echo("k", "none").launch())
+    response = echo("d", "none").launch()
+    assert not response.get("directives") and "nothing to play" in response["outputSpeech"]["ssml"]
+
+
+def test_watchdog_waits_longer_for_an_html_page_and_stops_when_it_plays(ma, clock, echo):
+    # After an idle night the Show can hold an HTML page's loads for ~10 s
+    # while its video already plays.
+    for device_id in ("apl-show", "html-show"):
+        devices.set_player_for_device(device_id, "Den")
+    page = echos.open_page("html-show", "html").page_id
+    watch.new_page(page)
+    watch.watch_page("apl-show")
+    watch.watch_page("html-show")
+    assert clock.pending() == [watch.PAGE_WATCHDOG_S, watch.HTML_PAGE_WATCHDOG_S]
+    channel.report(page, 0, 0, False)
+    assert clock.pending() == [watch.PAGE_WATCHDOG_S, watch.HTML_PAGE_WATCHDOG_S]
+    channel.report(page, 0, 700, True)                                 # its report says it plays
+    assert clock.pending() == [watch.PAGE_WATCHDOG_S]
+    echo("apl-show", "apl").session_ended()                            # its page closed
+    assert clock.pending() == []
 
 
 @pytest.fixture
-def renew(html_launch, monkeypatch):
-    """Echo d shows page p0 while MA plays on Den."""
-    monkeypatch.setattr(lf.bell, "page_of", lambda device_id: "p0")
-    monkeypatch.setattr(lf.device_mapping, "get_player_for_device", lambda device_id: "Den")
-    monkeypatch.setattr(lf.ma_control, "is_paused", lambda player_id: False)
-    order = html_launch[1]
-    monkeypatch.setattr(lf, "_resume_for", lambda device_id, position_ms=None, item_id=None:
-                        order.append(("resume", lp.is_live("d"), item_id)) or "ok")
-    return order
+def html_launch(ma, echo, store, monkeypatch):
+    """Echo d, paired with Den, gets the HTML page. MA pushed Den's song before. Yields Echo d."""
+    monkeypatch.setenv("ENABLE_APL", "true")
+    monkeypatch.setenv("HTML_PAGE_URL", "https://skill.example/bell/html/")
+    devices.set_player_for_device("d", "Den")
+    store.save({"playerId": "Den", "streamUrl": "http://ma/flow/0.mp3", "title": "Kicsi, gyere velem",
+                "artist": "Kaláka", "album": "Az én szívem"})
+    yield echo("d", "html")
+    handoff.closed("d")
 
 
-def test_a_playing_page_is_replaced_by_a_new_one_when_it_asks(renew):
-    response = lf.HtmlPageRenewHandler().handle(_renew("p0"))
-    assert renew == [("page", True), ("resume", True, None)]
-    assert len(response.directives) == 1 and response.should_end_session is None
+def _resumes(ma):
+    return [call for call in ma.calls if call[0] in ("seek", "play_index")]
 
 
-def test_a_page_replaced_at_a_track_end_starts_the_next_track(renew):
-    request = _renew("p0")
-    request.request_envelope.request.message["item"] = "q2"
-    lf.HtmlPageRenewHandler().handle(request)
-    assert renew == [("page", True), ("resume", True, "q2")]
+def test_open_sends_the_html_page_and_ma_hands_its_stream_to_it(html_launch, ma):
+    response = html_launch.launch()
+    assert [d["type"] for d in response["directives"]] == ["Alexa.Presentation.HTML.Start"]
+    assert "shouldEndSession" not in response
+    assert _resumes(ma) == [("seek", "den", 61)]
 
 
-def test_a_paused_page_is_not_replaced(renew, monkeypatch):
-    monkeypatch.setattr(lf.ma_control, "is_paused", lambda player_id: True)
-    response = lf.HtmlPageRenewHandler().handle(_renew("p0"))
-    assert renew == [] and not response.directives
+def test_open_without_ma_resume_drops_the_html_page(html_launch, ma, store):
+    ma.queue.current_item = None
+    store.save({"playerId": "Kitchen", "streamUrl": "http://ma/flow/kitchen.mp3"})
+    response = html_launch.launch()
+    assert not response.get("directives") and "nothing to play" in response["outputSpeech"]["ssml"]
+    assert not handoff.is_live("d")
 
 
-def test_an_old_page_is_not_replaced(renew):
-    response = lf.HtmlPageRenewHandler().handle(_renew("p-old"))
-    assert renew == [] and not response.directives
+@pytest.fixture
+def renew(html_launch, ma, clock):
+    """Echo d shows an HTML page while MA plays on Den. Yields its page id."""
+    html_launch.launch()
+    clock.advance(0.5)
+    del ma.calls[:]
+    return channel.page_of("d")
 
 
-def test_a_page_the_skill_lost_on_a_restart_is_replaced(renew, monkeypatch):
-    monkeypatch.setattr(lf.bell, "page_of", lambda device_id: None)
-    lf.HtmlPageRenewHandler().handle(_renew("p-old"))
-    assert renew == [("page", True), ("resume", True, None)]
+def test_a_playing_page_is_replaced_by_a_new_one_when_it_asks(renew, html_launch, ma):
+    response = html_launch.html_message({"renew": renew})
+    assert [d["type"] for d in response["directives"]] == ["Alexa.Presentation.HTML.Start"]
+    assert "shouldEndSession" not in response
+    assert _resumes(ma) == [("seek", "den", 61)]
 
 
-def test_a_tapped_playlist_song_plays_from_its_start(monkeypatch):
-    calls = []
-    monkeypatch.setattr(lf, "_resume_for", lambda device_id, position_ms=None, item_id=None:
-                        calls.append((device_id, position_ms, item_id)) or "ok")
-    assert lf._press("d", "jump", "q7")
-    assert calls == [("d", None, "q7")]
+def test_a_page_replaced_at_a_track_end_starts_the_next_track(renew, html_launch, ma):
+    html_launch.html_message({"renew": renew, "item": "q13"})
+    assert _resumes(ma) == [("play_index", "den", "q13")]
+
+
+def test_a_paused_page_is_not_replaced(renew, html_launch, ma):
+    ma.pause()
+    response = html_launch.html_message({"renew": renew})
+    assert _resumes(ma) == [] and not response.get("directives")
+
+
+def test_an_old_page_is_not_replaced(renew, html_launch, ma):
+    response = html_launch.html_message({"renew": "p-old"})
+    assert _resumes(ma) == [] and not response.get("directives")
+
+
+def test_a_page_the_skill_lost_on_a_restart_is_replaced(renew, html_launch, ma, monkeypatch):
+    monkeypatch.setattr(channel, "page_of", lambda device_id: None)
+    html_launch.html_message({"renew": "p-old"})
+    assert _resumes(ma) == [("seek", "den", 61)]
+
+
+def test_a_tapped_playlist_song_plays_from_its_start(renew, ma, page_client):
+    assert page_client.post(f"/bell/html/{renew}/action", json={"action": "jump", "item": "q7"}).status_code < 300
+    assert _resumes(ma) == [("play_index", "den", "q7")]
+
+
+def test_whats_playing_names_only_the_current_song(ma, echo):
+    from skill import devices
+    devices.set_player_for_device("d", "Den")
+    ma.queue.current_item = None
+    said = echo("d", "none").intent("WhatsPlaying")["outputSpeech"]["ssml"]
+    assert "Nothing is playing" in said

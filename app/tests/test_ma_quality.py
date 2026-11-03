@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from music_assistant_models.enums import ContentType
 from music_assistant_models.media_items import AudioFormat
 
-from skill.ma_control import quality
+from skill.ma.player import quality
 
 
 def _item(*formats, stream=None):

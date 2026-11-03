@@ -1,48 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Track time for the APL player page.
+"""Track time on the player pages.
 
-The page plays MA's flow stream in a Video component, which has no idea
-where one track ends and the next begins: its position counts from the
-start of the stream. The stream is the queue's tracks back to back, so
-a track starts in the video where the previous one ended: offset =
-previous offset + previous duration, and 0 for the first track of a page.
-On a track change the skill asks MA once for the duration and sends the
-page the offset; the page shows position - offset against the duration
-and keeps counting on its own (also through a local pause).
+A page plays MA's flow stream, the queue's tracks back to back. MA says
+where its current track starts in that stream (offset), and the page
+shows its position - offset against the track's duration.
 
-Everything here is pure; the MA query lives in ma_control.
+Everything here is pure.
 """
-
-import threading
-from collections import OrderedDict
-
-# Sessions remembered for change detection; old ones fall out.
-_MAX_SESSIONS = 32
-
-# A new page whose stream MA started further into the track than this
-# started mid-track (MA's own resume); below it, it's startup delay.
-_MID_TRACK_START_MS = 15_000
-
-# MA gives track lengths in whole seconds, so adding them up drifts by up to
-# a second a track. Further off than _RESYNC_MS from MA's clock, the page
-# resyncs; the margin covers the time MA takes to answer. Further off than
-# _RESYNC_MAX_MS, an APL video's position is not to be trusted (still 0, stuck);
-# an HTML page's comes from its audio.
-_RESYNC_MS = 2_000
-_RESYNC_MAX_MS = 30_000
-
-
-def track_key(info):
-    """What identifies the playing track in the skill's metadata (data.info)."""
-    return (info.get('audioSources') or '',
-            info.get('primaryText') or '',
-            info.get('secondaryText') or '',
-            info.get('albumText') or '')
-
-
-def title_key(info):
-    """The track by title, artist and album only: MA's resume gives it a new stream URL."""
-    return track_key(info)[1:]
 
 
 def video_position_ms(arguments, index=2):
@@ -60,64 +24,6 @@ def video_position_ms(arguments, index=2):
         return None
 
 
-def track_offset_ms(position_ms, elapsed_ms):
-    """Where the current track started in the page's video, in ms.
-
-    Below 0 when the page's stream started mid-track (a resume), else a
-    little below 0 is startup delay.
-    """
-    offset = int(position_ms) - int(elapsed_ms)
-    return offset if offset < -_MID_TRACK_START_MS else max(offset, 0)
-
-
-def choose_offset_ms(previous_end_ms, position_ms, elapsed_ms, any_gap=False):
-    """Where the current track started in the page's video, in ms, or None.
-
-    The end of the previous track when known, unless the video position
-    minus MA's elapsed time is _RESYNC_MS to _RESYNC_MAX_MS off it (any_gap: more than
-    _RESYNC_MS). Without
-    the previous end, that measured start, which needs the page's position.
-    """
-    measured = None
-    if position_ms is not None and elapsed_ms is not None:
-        measured = track_offset_ms(position_ms, elapsed_ms)
-    if previous_end_ms is None:
-        return measured
-    if measured is not None and _RESYNC_MS < abs(measured - previous_end_ms) and (
-            any_gap or abs(measured - previous_end_ms) <= _RESYNC_MAX_MS):
-        return measured
-    return previous_end_ms
-
-
-def page_start_offset_ms(position_ms, paused, paused_at_ms, elapsed_ms, stream_start_ms,
-                         ma_paused_ms=None):
-    """trackOffset for the first track of a new page.
-
-    - Opened paused (a pause from MA reopens the page at the stream's start):
-      show where playback stopped, the page's own pause position if known,
-      else MA's elapsed time.
-    - Opened by a resume: MA's new stream starts stream_start_ms into the
-      track, so the video's 0 is that point of the track.
-    - Opened by MA resuming on its own (play in MA while the page was
-      closed): MA resumes where it paused, ma_paused_ms into the track, if
-      the skill saw that pause; else, if MA's elapsed time is well ahead
-      of the video, the stream started that far into the track. (Not for
-      a replay of an old stream URL: MA restarts that flow where it first
-      started while its clock runs on, so the skill never replays one.)
-    - Otherwise the stream starts with the track: 0.
-    """
-    if paused:
-        stopped_at = paused_at_ms if paused_at_ms is not None else elapsed_ms
-        return (position_ms or 0) - (stopped_at or 0)
-    if stream_start_ms is not None:
-        return -stream_start_ms
-    if ma_paused_ms is not None:
-        return -ma_paused_ms
-    if elapsed_ms is not None and elapsed_ms - (position_ms or 0) > _MID_TRACK_START_MS:
-        return (position_ms or 0) - elapsed_ms
-    return 0
-
-
 def resume_position_s(requested_ms, elapsed_s, duration_s):
     """Where to resume, in whole seconds inside the track.
 
@@ -130,137 +36,33 @@ def resume_position_s(requested_ms, elapsed_s, duration_s):
     return max(int(position), 0)
 
 
-class TrackChangeTracker:
-    """Remembers, per APL session, the track seen last and where it lies in the video."""
-
-    def __init__(self, max_sessions=_MAX_SESSIONS):
-        self._seen = OrderedDict()
-        self._max = max_sessions
-        self._lock = threading.Lock()
-
-    def changed(self, session_id, key):
-        """Record key for session_id; True if it differs from the last one.
-
-        Recording before the caller queries MA means concurrent refreshes
-        of the same change query only once.
-        """
-        with self._lock:
-            old = self._seen.get(session_id)
-            if old is not None and old["key"] == key:
-                self._seen.move_to_end(session_id)
-                return False
-            if old is None:
-                previous_end = None   # a page from before a restart: from its video position
-            elif old["key"] is None:
-                previous_end = 0      # a new page: its stream starts with this track
-                start = old.get("start")
-                if start and start[0] != key[1:] and start[1] is not None and start[2]:
-                    # MA moved on before the page's first pull: this track follows its first
-                    previous_end = start[1] + start[2]
-            elif old["offset"] is not None and old["duration"]:
-                previous_end = old["offset"] + old["duration"]
-            else:
-                previous_end = None
-            self._seen[session_id] = {"key": key, "offset": None, "duration": None,
-                                      "last": False, "previous_end": previous_end,
-                                      "past_start": old is not None and old["key"] is None
-                                      and previous_end != 0,
-                                      "before": old and (old.get("item"), old["offset"])}
-            self._seen.move_to_end(session_id)
-            while len(self._seen) > self._max:
-                self._seen.popitem(last=False)
-            return True
-
-    def previous_end(self, session_id):
-        """Where the previous track of this session ended in the video (ms), or None."""
-        with self._lock:
-            entry = self._seen.get(session_id)
-            return entry["previous_end"] if entry else None
-
-    def past_start(self, session_id):
-        """Whether this track followed the page's first before the page's first pull."""
-        with self._lock:
-            entry = self._seen.get(session_id)
-            return bool(entry and entry.get("past_start"))
-
-    def same_item_offset(self, session_id, item_id):
-        """The previous track's offset if it was MA's queue item item_id too, else None.
-
-        MA sends new details for a playing item, e.g. a podcast episode's.
-        """
-        with self._lock:
-            entry = self._seen.get(session_id)
-            before = entry and entry.get("before")
-            return before[1] if item_id and before and before[0] == item_id else None
-
-    def offset(self, session_id):
-        """Where the current track starts in the session's video (ms), or None."""
-        with self._lock:
-            entry = self._seen.get(session_id)
-            return entry["offset"] if entry else None
-
-    def started(self, session_id, start=None):
-        """session_id is a new page, or its page has a new stream: its next track is its first.
-
-        start: (title key, offset ms, duration ms) of the track the page was built with.
-        """
-        with self._lock:
-            self._seen[session_id] = {"key": None, "offset": None, "duration": None,
-                                      "last": False, "previous_end": 0, "start": start}
-            self._seen.move_to_end(session_id)
-            while len(self._seen) > self._max:
-                self._seen.popitem(last=False)
-
-    def record(self, session_id, offset_ms, duration_ms, last=False, item_id=None):
-        """Remember where the current track lies, for the next change.
-
-        last: nothing follows it in MA's queue. item_id: its MA queue item.
-        """
-        with self._lock:
-            entry = self._seen.get(session_id)
-            if entry:
-                entry["offset"], entry["duration"], entry["last"] = offset_ms, duration_ms, last
-                entry["item"] = item_id
-
-    def set_last(self, session_id, last):
-        """Whether nothing follows the current track now (repeat or shuffle changed)."""
-        with self._lock:
-            entry = self._seen.get(session_id)
-            if entry:
-                entry["last"] = last
-
-    def track_end_ms(self, session_id):
-        """Where the current track ends in this session's video (ms), or None.
-
-        None also on MA's last track: there the page ends the queue itself.
-        """
-        with self._lock:
-            entry = self._seen.get(session_id)
-            if not entry or entry["last"] or entry["offset"] is None or not entry["duration"]:
-                return None
-            return entry["offset"] + entry["duration"]
-
-    def queue_end_ms(self, session_id):
-        """Where MA's queue ends in this session's video (ms), or None if not on its last track."""
-        with self._lock:
-            entry = self._seen.get(session_id)
-            if not entry or not entry["last"] or entry["offset"] is None or not entry["duration"]:
-                return None
-            return entry["offset"] + entry["duration"]
+# MA counts a track as started in its stream after this long; the skill never asks for less of one.
+SAME_TRACK_S = 1
 
 
-# Titles longer than these are shown smaller, then smaller again, so they
-# fit in two lines (the page's Audio_PrimaryTextLong and _PrimaryTextLonger).
+def stream_offset_ms(start_ms, track_at, anchored_at, since, speed):
+    """Where MA's current track starts in its stream, in ms of the stream; None: MA doesn't say yet.
+
+    since: when MA sent the stream (clock.time()). start_ms: where the skill
+    asked MA to start the stream's first track, or None if MA started it.
+    The stream's first track starts at the skill's place: MA's clock is off
+    there after a seek with repeat one. A later track starts where MA's
+    queue clock puts it (track_at: when the track was at 0), once MA has
+    updated it (anchored_at) for this stream.
+    """
+    if start_ms is not None and (track_at is None or track_at - since < SAME_TRACK_S):
+        return round(-start_ms / (speed or 1))
+    if track_at is not None and anchored_at >= since:
+        return 1000 * round(track_at - since)
+    return None
+
+
 TITLE_SIZE_CHARS = (30, 40)
 
 
 def title_size(title):
     """0 for a short title, 1 for a long one, 2 for a longer one."""
     return sum(len(title or "") > chars for chars in TITLE_SIZE_CHARS)
-
-
-# Per page (its id), shared by the pages the skill builds (apl.py) and their events.
-pages = TrackChangeTracker()
 
 
 def upcoming_commands(queue_end_ms, upcoming):

@@ -12,12 +12,14 @@ import logging
 import re
 import threading
 
+from . import clock
+
 logger = logging.getLogger(__name__)
 
 MAX_SECONDS = 24 * 3600
 _DURATION = re.compile(r"^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$")
 
-_timers = {}    # device_id -> threading.Timer
+_timers = {}    # device_id -> its timer
 _lock = threading.Lock()
 
 
@@ -42,14 +44,18 @@ def spoken(seconds):
 
 def start(device_id, seconds, on_due):
     """Run on_due(device_id) in seconds, replacing the device's timer."""
-    timer = threading.Timer(seconds, _due, (device_id, on_due))
-    timer.daemon = True
+    def due():
+        with _lock:
+            if _timers.get(device_id) is not timer:
+                return
+            del _timers[device_id]
+        _due(device_id, on_due)
+
     with _lock:
         old = _timers.pop(device_id, None)
-        _timers[device_id] = timer
+        timer = _timers[device_id] = clock.after(seconds, due)
     if old:
         old.cancel()
-    timer.start()
 
 
 def cancel(device_id):
@@ -62,10 +68,6 @@ def cancel(device_id):
 
 
 def _due(device_id, on_due):
-    with _lock:
-        if _timers.get(device_id) is not threading.current_thread():
-            return
-        del _timers[device_id]
     logger.info("Sleep timer on %s ran out: pausing MA", device_id[-8:])
     try:
         on_due(device_id)

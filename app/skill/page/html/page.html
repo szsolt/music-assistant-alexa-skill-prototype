@@ -1,0 +1,104 @@
+<!doctype html>
+<!-- The player page as a web app (see channel.py); it looks like the APL page (page/apl/document.json). -->
+<html><head><meta charset="utf-8"><title>Music Assistant</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdn.html.games.alexa.a2z.com/alexa-html/latest/alexa-html.js"></script>
+<style>
+<!--include:page.css-->
+</style></head><body>
+<div id="bg"></div>
+<div id="clock"></div>
+<img id="logo" src="/bell/logo.png" alt="">
+<div id="sleep" class="hidden"><svg viewBox="0 0 24 24"><path/></svg><span id="sleepLeft"></span></div>
+<div id="main">
+  <div id="track">
+    <img id="cover" alt="">
+    <canvas id="viz"></canvas>
+    <div id="right">
+      <div id="info" class="panel"><div id="title"></div><div id="artist"></div><div id="album"></div><div id="lyNote"></div></div>
+      <div id="lyrics" class="panel"><div id="lyTitle"></div><div id="lyBody"></div></div>
+      <div id="upnext" class="hidden"><img id="nextImage" alt=""><div>
+        <div id="nextLabel">Up next</div><div id="nextTitle"></div><div id="nextArtist"></div></div></div>
+    </div>
+  </div>
+  <div id="controls" class="panel">
+    <div id="sliderRow"><span id="elapsed">0:00</span>
+      <div id="seek"><canvas id="wave"></canvas><input id="slider" type="range" min="0" max="0" value="0"></div><div id="bar"></div>
+      <span id="total">0:00</span></div>
+    <div id="qrow"><span id="quality"></span><span id="speed" class="hidden"></span></div>
+    <div id="buttons">
+      <button id="More"><svg viewBox="0 0 24 24"><path d="M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg></button>
+      <button id="FavAlbum"><svg viewBox="0 0 24 24"><path d="M5.5 5.5h13v13H5.5z" fill="none" stroke="#fff" stroke-width="1.5"/>
+        <path transform="translate(7.8,7.6) scale(.35)" fill="none" stroke="#fff" stroke-width="4.5" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></button>
+      <button id="SkipBack" style="display:none"><svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/><text x="12" y="16" text-anchor="middle">10</text></svg></button>
+      <button id="Shuffle"><svg viewBox="0 0 24 24"><path id="shuffleIcon" transform="translate(3,3) scale(.75)"/></svg></button>
+      <button id="Previous"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>
+      <button id="PlayPause"><svg viewBox="0 0 24 24"><path id="playIcon" d="M8 5v14l11-7z"/></svg></button>
+      <button id="Next"><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
+      <button id="SkipForward" style="display:none"><svg viewBox="0 0 24 24"><path transform="matrix(-1 0 0 1 24 0)" d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/><text x="12" y="16" text-anchor="middle">30</text></svg></button>
+      <button id="Repeat"><svg viewBox="0 0 24 24"><path id="repeatIcon"/></svg></button>
+      <button id="FavSong"><svg viewBox="0 0 24 24"><path transform="translate(4.2,4.07) scale(.65)" fill="none" stroke="#fff" stroke-width="2.4" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></button>
+      <button id="Playlist"><svg viewBox="0 0 24 24"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/></svg></button>
+    </div>
+  </div>
+</div>
+<div id="pl"><h4><span id="plHead"></span><span id="plClose">✕</span></h4>
+<div id="plOpts"><span id="plAuto">Autoplay</span><span id="plFade"><svg class="rings" viewBox="0 0 24 24"><circle cx="9" cy="9" r="7"/><circle cx="15" cy="15" r="7"/></svg>Crossfade</span><span id="plClear">Clear</span><span id="plMove">Move to…</span><span id="plSave">Save</span></div><div id="plBox"><div id="plList"></div></div></div>
+<div id="sheet"><h4><span id="sheetBack">‹</span><span id="sheetHead"></span><span id="sheetFav" class="heart"><svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></span><span id="sheetMore" class="more">⋮</span><span id="sheetClose">✕</span></h4>
+<div id="bBar"><input id="q" type="search" enterkeyhint="search" placeholder="Search"><span id="bGo"><svg viewBox="0 0 24 24"><path id="bGoIcon"/></svg></span>
+<span id="bFav">Favourites</span><span id="bLib">Library</span><span id="bRecent">Recent</span></div><div id="sheetBody"></div></div>
+<div id="toast"></div>
+<div id="shade"></div><div id="menu"></div>
+<div id="ask"><input id="askName" placeholder="Playlist name" maxlength="100" enterkeyhint="done"><span id="askOk">Create</span></div>
+<div id="busy"><i></i><i></i><i></i></div>
+<audio id="audio" preload="auto"></audio>
+<script>
+// The page's script by job; the skill inlines each part here (routes.page_html).
+<!--include:core.js-->
+<!--include:notice.js-->
+<!--include:renew.js-->
+<!--include:news.js-->
+<!--include:player.js-->
+<!--include:buttons.js-->
+<!--include:playlist.js-->
+<!--include:menu.js-->
+<!--include:browse.js-->
+<!--include:lyrics.js-->
+<!--include:viz.js-->
+// What the page shows first; the skill fills it in (channel.start_state).
+const START = /*START*/null;
+const BASE = location.pathname + '/';
+const audio = $('audio');
+
+// Times are in ms. trackOffset is where the current track starts in the
+// stream: MA plays the whole queue as one stream. -1 hides a button.
+const state = Object.assign({
+  title: '', artist: '', album: '', titleSize: 0, cover: '', background: '', quality: '',
+  item: '', trackOffset: 0, trackDuration: 0, queueEnd: 0, seen: 0,
+  nextTitle: '', nextTitleSize: 0, nextArtist: '', nextAlbum: '', nextQuality: '', nextImage: '', nextDuration: -1, nextItem: '',
+  songFavorite: -1, albumFavorite: -1, shuffle: -1, repeat: -1, sleepAt: 0, speed: -1,
+}, START);
+
+for (const kind of ['pointerdown', 'pointermove', 'keydown']) document.addEventListener(kind, touched, true);
+// Each part wires its buttons and timers once every part is declared.
+startPlayer(); listen(); startButtons(); startPlaylist(); startMenu(); startBrowse(); startLyrics(); startViz();
+setInterval(() => {
+  renewWhenDue();
+  if (pl.open && !pl.dragging && Date.now() > closeAt) closeList();
+  // Browse stays while paused, and while you type.
+  const typing = ['q', 'askName'].includes(document.activeElement.id) && document.activeElement.value;
+  if (sheet.kind && !audio.paused && !typing && Date.now() > closeAt) { closeMenu(); closeSheet(); }
+  if (pl.open) plTick();
+  lyricsTick(); sleepTick();
+  const near = state.trackDuration > 0 && state.trackOffset + state.trackDuration - position() <= 20000;
+  $('upnext').style.opacity = near ? 1 : .8;
+  const d = new Date(); $('clock').textContent = d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
+}, 250);
+connectAlexa();
+audio.src = state.stream;
+if (state.autoplay) play();
+report();   // at once: MA's new stream may already wait for this page
+askWave();
+try { if (localStorage.getItem('lyrics')) setLyrics(true); if (localStorage.getItem('viz')) setViz(true); } catch (e) {}
+render();
+</script></body></html>

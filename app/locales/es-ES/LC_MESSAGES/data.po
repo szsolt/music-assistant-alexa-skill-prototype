@@ -34,22 +34,6 @@ msgstr ""
 msgid "Sorry, I could not understand what you've just said."
 msgstr "Lo siento, No pude entender lo que acabas de decir."
 
-#: alexa/data.py:9
-msgid "This is radio, you have to wait for previous or next track to play."
-msgstr "Recuerda que esto es la radio, tu debes esperar la anterior o siguiente reproducción en lista."
-
-#: alexa/data.py:10
-msgid "Resuming {}"
-msgstr "reiniciando la reproduccion  {}"
-
-#: alexa/data.py:11
-msgid ""
-"This is radio, you can not do that.  You can ask me to stop or pause to "
-"stop listening."
-msgstr ""
-"Recuerda que esto es la radio, no puedo hacer eso.  Sí quieres detener "
-" la reproducción, me puedes decir: para o pausa, ."
-
 #: alexa/data.py:12
 msgid "Goodbye."
 msgstr "Adiós."
@@ -65,4 +49,3 @@ msgstr "prueba español"
 #: alexa/data.py:16
 msgid "test with parameters {} and {}"
 msgstr "prueba con los parámetros {} y {)"
-

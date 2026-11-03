@@ -1,7 +1,7 @@
 import json
 from types import SimpleNamespace as NS
 
-from skill import voice_commands, voice_match, voice_model, voice_names
+from skill.voice import commands as voice_commands, match as voice_match, model as voice_model, names as voice_names
 
 
 def _values(types, name):
@@ -208,54 +208,13 @@ def test_upload_merges_each_locale_with_a_template_once(monkeypatch, tmp_path):
             "invocationName": "mine", "intents": [], "types": []}}},
         set_interaction_model_v1=lambda _id, _stage, locale, model: sent.__setitem__(locale, model),
         get_skill_status_v1=lambda *_, **__: done)
-    monkeypatch.setattr(model_upload, "_client", lambda: client)
     voice = {"hash": "h1", "types": [{"name": "MA_ARTIST", "values": [{"name": {"value": "A"}}]}]}
-    assert model_upload.upload(voice) == ["en-US"]                 # no German template yet
+    assert model_upload.upload(voice, client) == ["en-US"]         # no German template yet
     language = sent["en-US"]["interactionModel"]["languageModel"]
     assert language["invocationName"] == "mine"
     assert "PlayArtist" in {i["name"] for i in language["intents"]}
     sent.clear()
-    assert model_upload.upload(voice) == [] and not sent           # same names: no upload
-
-
-def test_upload_failing_locale_does_not_hold_up_the_others(monkeypatch, tmp_path):
-    import pytest
-    pytest.importorskip("ask_sdk_model_runtime")
-    from skill import model_upload
-    monkeypatch.setenv("DEVICE_MAPPING_PATH", str(tmp_path / "m.json"))
-    monkeypatch.setenv("SKILL_ID", "skill")
-    monkeypatch.setattr(model_upload, "configured", lambda: True)
-    monkeypatch.setattr(model_upload, "BUILD_POLL_S", 0)
-    sent = []
-    status = {"interactionModel": {
-        "en-AU": {"lastUpdateRequest": {"status": "SUCCEEDED"}},
-        "en-US": {"lastUpdateRequest": {"status": "FAILED", "buildDetails": {"steps": [
-            {"name": "LANGUAGE_MODEL_QUICK_BUILD", "status": "SUCCEEDED"},
-            {"name": "LANGUAGE_MODEL_FULL_BUILD", "status": "FAILED"}]}}}}}
-    client = NS(
-        get_skill_manifest_v1=lambda *_: {"manifest": {"publishingInformation": {
-            "locales": {"en-US": {}, "en-AU": {}}}}},
-        get_interaction_model_v1=lambda *_: {"interactionModel": {"languageModel": {"intents": [], "types": []}}},
-        set_interaction_model_v1=lambda _id, _stage, locale, model: sent.append(locale),
-        get_skill_status_v1=lambda *_, **__: status)
-    monkeypatch.setattr(model_upload, "_client", lambda: client)
-    voice = {"hash": "h1", "types": []}
-    with pytest.raises(model_upload.UploadFailed, match=r"en-US build failed in \['LANGUAGE_MODEL_FULL_BUILD'\]"):
-        model_upload.upload(voice)
-    assert sent == ["en-AU", "en-US"]
-    sent.clear()
-    with pytest.raises(model_upload.UploadFailed):
-        model_upload.upload(voice)
-    assert sent == ["en-US"]                                       # en-AU is up to date
-    sent.clear()
-
-    def down(_id, _stage, locale, model):
-        sent.append(locale)
-        raise ConnectionError("down")
-    client.set_interaction_model_v1 = down
-    with pytest.raises(model_upload.UploadFailed, match="en-AU: ConnectionError.*en-US: ConnectionError"):
-        model_upload.upload({"hash": "h2", "types": []})
-    assert sent == ["en-AU", "en-US"]                              # one error doesn't stop the rest
+    assert model_upload.upload(voice, client) == [] and not sent   # same names: no upload
 
 
 def test_upload_needs_credentials(monkeypatch):
@@ -279,3 +238,27 @@ def test_favorite_kind_from_what_was_said():
     assert voice_commands.favorite_kind({}) == "song"
     assert voice_commands.favorite_kind({"what": NS(value="Queen", resolutions=None)}) is None
     assert voice_commands.FAVORITE_INTENTS == {"AddFavorite": True, "RemoveFavorite": False}
+
+
+def test_ma_refusing_the_voice_names_is_one_line_in_the_log(monkeypatch, caplog):
+    import pytest
+    from skill.voice import lists as voice_lists
+    from skill.ma.errors import MAFailed
+
+    class Done(Exception):
+        pass
+
+    def sleep(seconds):
+        if seconds == voice_lists.EVERY_S:
+            raise Done
+
+    def refused():
+        raise MAFailed("no")
+
+    monkeypatch.setattr(voice_lists.time, "sleep", sleep)
+    monkeypatch.setattr(voice_lists, "refresh", refused)
+    monkeypatch.setattr(voice_lists.model_upload, "upload", lambda model: None)
+    with pytest.raises(Done):
+        voice_lists._loop()
+    assert "no" in caplog.text
+    assert not any(record.exc_info for record in caplog.records)

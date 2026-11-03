@@ -1,8 +1,11 @@
+import json
+
 import pytest
 
 pytest.importorskip("ask_sdk_model")
 
-from skill import apl, util  # noqa: E402
+from skill import view  # noqa: E402
+from skill.page.apl import render  # noqa: E402
 
 
 class _Builder:
@@ -13,47 +16,47 @@ class _Builder:
         self.directives.append(directive)
 
 
-def _set(info, shown, monkeypatch):
-    monkeypatch.setattr(util, "apl_enabled", lambda: True)
-    monkeypatch.setattr(util, "get_ma_hostname", lambda **kw: "")
-    builder = _Builder()
-    util.update_apl_metadata(builder, info, shown)
-    return [(c["componentId"], c["property"]) for d in builder.directives for c in d.commands]
+def _set(v, shown):
+    return [(c["componentId"], c["property"]) for c in render.metadata_commands(v, shown)]
 
 
-def _info(image):
-    return {"primaryText": "Song", "secondaryText": "Artist", "albumText": "Album",
-            "coverImageSource": image, "backgroundImageSource": image}
+def _song(image):
+    return view.View(title="Song", artist="Artist", album="Album", cover=image)
 
 
-def test_images_the_page_shows_are_not_set_again(monkeypatch):
+def _playing(store, image, **more):
+    """MA's latest stream: _song(image)'s song."""
+    store.save(dict({"streamUrl": "https://ma.example/flow/1.mp3", "title": "Song", "artist": "Artist",
+                     "album": "Album", "imageUrl": image}, **more))
+
+
+def test_images_the_page_shows_are_not_set_again():
     shown = {}
-    assert ("AlexaBackground", "backgroundImageSource") in _set(_info("a.jpg"), shown, monkeypatch)
-    assert _set(_info("a.jpg"), shown, monkeypatch) == [
+    assert ("AlexaBackground", "backgroundImageSource") in _set(_song("a.jpg"), shown)
+    assert _set(_song("a.jpg"), shown) == [
         ("Audio_PrimaryText", "text"), ("Audio_PrimaryTextLong", "text"), ("Audio_SecondaryText", "text"),
         ("Audio_PrimaryTextLonger", "text"), ("AudioPlayerRoot", "titleSize"), ("AudioPlayerRoot", "album")]
 
 
-def test_the_image_the_page_switched_to_itself_is_not_set_again(monkeypatch):
+def test_the_image_the_page_switched_to_itself_is_not_set_again():
     shown = {"cover": "a.jpg", "background": "a.jpg", "next": "b.jpg"}
-    assert ("Audio_CoverArt", "imageSource") not in _set(_info("b.jpg"), shown, monkeypatch)
+    assert ("Audio_CoverArt", "imageSource") not in _set(_song("b.jpg"), shown)
     assert shown == {"cover": "b.jpg", "background": "b.jpg", "next": None}
-    assert ("Audio_CoverArt", "imageSource") in _set(_info("c.jpg"), shown, monkeypatch)
+    assert ("Audio_CoverArt", "imageSource") in _set(_song("c.jpg"), shown)
 
 
-def test_an_ma_image_on_the_page_matches_its_stream_server_url(monkeypatch):
+def test_an_ma_image_on_the_page_matches_its_stream_server_url():
     shown = {"cover": "a.jpg", "background": "a.jpg",
              "next": "https://ma.example.com/imageproxy/b1?size=512"}
-    commands = _set(_info("https://stream.example.com/imageproxy/b1?size=512&fmt=jpg"), shown, monkeypatch)
+    commands = _set(_song("https://stream.example.com/imageproxy/b1?size=512&fmt=jpg"), shown)
     assert ("Audio_CoverArt", "imageSource") not in commands
     assert ("AlexaBackground", "backgroundImageSource") not in commands
 
 
 def test_long_titles_have_smaller_twins_that_follow_track_changes():
-    import json, pathlib
-    document = json.loads((pathlib.Path(apl.__file__).parent / "apl_document.json").read_text())
+    document = render.document()
     layout = document["layouts"]["AudioPlayer"]
-    texts = {c.get("id"): c for c in apl._components(layout) if c.get("type") == "Text"}
+    texts = {c.get("id"): c for c in render.components(layout) if c.get("type") == "Text"}
     twins = [texts[i] for i in ("Audio_PrimaryText", "Audio_PrimaryTextLong", "Audio_PrimaryTextLonger")]
     assert len({t["maxLines"] for t in twins}) == 1 and all("fontSize" in t for t in twins[1:])
     # Exactly one shows for each size.
@@ -70,18 +73,17 @@ def test_long_titles_have_smaller_twins_that_follow_track_changes():
 
 
 @pytest.mark.parametrize("title, size", [("x" * 30, 0), ("x" * 31, 1), ("x" * 40, 1), ("x" * 41, 2), ("", 0)])
-def test_the_page_starts_with_the_title_size_it_needs(monkeypatch, title, size):
-    monkeypatch.setattr(apl, "_get_metadata", lambda device_id=None: {"primaryText": title})
+def test_the_page_starts_with_the_title_size_it_needs(store, title, size):
+    store.save({"streamUrl": "https://ma.example/flow/1.mp3", "title": title})
     builder = _Builder()
-    apl.add_apl(builder)
+    render.start(builder)
     assert builder.directives[0].document["mainTemplate"]["items"][0]["primaryTextSize"] == size
 
 
 def test_artist_and_album_have_a_line_each_that_follows_track_changes():
-    import json, pathlib
-    document = json.loads((pathlib.Path(apl.__file__).parent / "apl_document.json").read_text())
+    document = render.document()
     layout = document["layouts"]["AudioPlayer"]
-    texts = {c.get("id"): c for c in apl._components(layout) if c.get("type") == "Text"}
+    texts = {c.get("id"): c for c in render.components(layout) if c.get("type") == "Text"}
     assert texts["Audio_SecondaryText"]["maxLines"] == "@secondarySongTextMaxLines"
     assert all(r.get("numbers", {}).get("secondarySongTextMaxLines", 1) == 1 for r in document["resources"])
     album = texts["Audio_AlbumText"]
@@ -98,27 +100,22 @@ def test_artist_and_album_have_a_line_each_that_follows_track_changes():
     assert {"type": "SetValue", "property": "album", "value": "${nextAlbum}"} in flip["commands"]
 
 
-def test_the_page_starts_with_the_album(monkeypatch):
-    monkeypatch.setattr(apl, "_get_metadata", lambda device_id=None: {"primaryText": "T", "albumText": "Alb"})
+def test_the_page_starts_with_the_album(store):
+    store.save({"streamUrl": "https://ma.example/flow/1.mp3", "title": "Esti dal", "album": "Az én szívem"})
     builder = _Builder()
-    apl.add_apl(builder)
-    assert builder.directives[0].document["mainTemplate"]["items"][0]["albumText"] == "Alb"
+    render.start(builder)
+    assert builder.directives[0].document["mainTemplate"]["items"][0]["albumText"] == "Az én szívem"
 
 
-def test_a_track_with_no_artist_or_album_clears_the_last_ones(monkeypatch):
-    builder = _Builder()
-    monkeypatch.setattr(util, "apl_enabled", lambda: True)
-    monkeypatch.setattr(util, "get_ma_hostname", lambda **kw: "")
-    util.update_apl_metadata(builder, {"primaryText": "Radio"}, {})
-    values = {(c["componentId"], c["property"]): c["value"] for d in builder.directives for c in d.commands}
+def test_a_track_with_no_artist_or_album_clears_the_last_ones():
+    values = {(c["componentId"], c["property"]): c["value"] for c in render.metadata_commands(view.View(title="Radio"), {})}
     assert values[("Audio_SecondaryText", "text")] == "" and values[("AudioPlayerRoot", "album")] == ""
 
 
 def test_quality_sits_left_of_the_time_and_follows_track_changes():
-    import json, pathlib
-    document = json.loads((pathlib.Path(apl.__file__).parent / "apl_document.json").read_text())
+    document = render.document()
     layout = document["layouts"]["AudioPlayer"]
-    texts = {c.get("id"): c for c in apl._components(layout) if c.get("type") == "Text"}
+    texts = {c.get("id"): c for c in render.components(layout) if c.get("type") == "Text"}
     label = texts["Audio_QualityText"]
     assert label["text"] == "${quality}" and label["position"] == "absolute" and label["top"] == 0
     assert label["style"] == "@sliderTimeStampTestStyle"      # as AlexaSlider draws the time
@@ -128,22 +125,48 @@ def test_quality_sits_left_of_the_time_and_follows_track_changes():
     assert '"property": "quality", "value": "${nextQuality}"' in json.dumps(layout)
 
 
-def test_a_new_pages_first_update_does_not_set_its_images_again(monkeypatch):
-    monkeypatch.setattr(apl, "_get_metadata", lambda device_id=None: _info("a.jpg"))
-    monkeypatch.setattr(util, "get_ma_hostname", lambda **kw: "")
+def test_a_new_pages_first_update_does_not_set_its_images_again(store):
+    _playing(store, "a.jpg")
     builder = _Builder()
-    apl.add_apl(builder)
+    render.start(builder, "d")
     page_id = builder.directives[0].document["mainTemplate"]["items"][0]["bellPage"]
-    assert ("AlexaBackground", "backgroundImageSource") not in _set(_info("a.jpg"), apl.images_on(page_id), monkeypatch)
+    assert ("AlexaBackground", "backgroundImageSource") not in _set(_song("a.jpg"), render.images("d", page_id))
 
 
-def test_a_new_page_remembers_its_first_track(monkeypatch):
-    from skill import track_time
-    monkeypatch.setattr(apl, "_get_metadata", lambda device_id=None: _info("a.jpg"))
-    monkeypatch.setattr(util, "get_ma_hostname", lambda **kw: "")
-    monkeypatch.setattr(apl, "_start_track_time", lambda device_id: (-68_000, 69_000))
+def _track_offset(response):
+    """The trackOffset an answer sets, or None."""
+    for directive in response.get("directives", []):
+        for command in directive.get("commands", []):
+            if command.get("property") == "trackOffset":
+                return command["value"]
+    return None
+
+
+@pytest.fixture
+def den_page(skill, ma, store, echo, monkeypatch):
+    """Echo d1 on Den shows the APL page; MA is 61.4 s into Song. Yields (Echo d1, its page id)."""
+    from skill import devices
+    monkeypatch.setenv("ENABLE_APL", "true")
+    devices.set_player_for_device("d1", "Den")
+    _playing(store, "a.jpg", playerId="Den")
     builder = _Builder()
-    apl.add_apl(builder, device_id="d1")
-    page_id = builder.directives[0].document["mainTemplate"]["items"][0]["bellPage"]
-    track_time.pages.changed(page_id, track_time.track_key(dict(_info("b.jpg"), primaryText="Next")))
-    assert track_time.pages.previous_end(page_id) == 1_000
+    render.start(builder, "d1")
+    return echo("d1", "apl"), builder.directives[0].document["mainTemplate"]["items"][0]["bellPage"]
+
+
+def test_a_page_the_skill_doesnt_know_gets_its_background_once(skill, ma, store, echo, monkeypatch):
+    from skill import devices
+    monkeypatch.setenv("ENABLE_APL", "true")
+    devices.set_player_for_device("d1", "Den")
+    _playing(store, "a.jpg", playerId="Den")
+    device = echo("d1", "apl")
+
+    def background_set(response):
+        return any(c.get("componentId") == "AlexaBackground" for d in response["directives"] for c in d["commands"])
+    assert background_set(device.user_event("MetadataRefresh", 1, "${videoProgressValue}", "5f3a9c0e1b2d4e6f"))
+    assert not background_set(device.user_event("MetadataRefresh", 2, "${videoProgressValue}", "5f3a9c0e1b2d4e6f"))
+
+
+def test_a_page_the_skill_doesnt_know_keeps_its_next_image():
+    render.images("d1", "5f3a9c0e1b2d4e6f")["next"] = "b.jpg"
+    assert render.images("d1", "5f3a9c0e1b2d4e6f")["next"] == "b.jpg"

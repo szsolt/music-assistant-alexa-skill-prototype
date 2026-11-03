@@ -10,6 +10,8 @@ services:
       - DEBUG_PORT=5678 #optional
       - LOCALE=en-US # optional: skill locale (e.g. en-US, en-GB, de-DE)
       - AWS_DEFAULT_REGION=us-east-1 #optional
+      - ENABLE_APL=false #optional: screen rendering on APL Echos
+      - HTML_PAGE_URL= #optional: HTML player page URL, see README
       - TZ=America/Chicago # set container timezone (override as needed)
     secrets:
       - APP_USERNAME

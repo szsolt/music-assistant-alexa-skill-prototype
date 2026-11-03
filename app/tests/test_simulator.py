@@ -7,7 +7,7 @@ from ask_sdk_core.skill_builder import SkillBuilder
 from ask_sdk_core.utils import is_intent_name
 from flask import Flask
 
-from endpoints.simulator import simulator_bp
+from web.simulator import simulator_bp
 
 
 def _app(skill_id):
